@@ -5,7 +5,7 @@ using Toybox.System;
 using Toybox.Math;
 
 class HomePowerView extends WatchUi.View {
-    const PAGE_COUNT = 7;
+    const PAGE_COUNT = 6;
 
     // Layout tuned specifically for the 454x454 round AMOLED display used by
     // the Fenix 8 47 mm / 51 mm. All large text stays inside the wide middle
@@ -86,7 +86,7 @@ class HomePowerView extends WatchUi.View {
     }
 
     function activate() {
-        if (_page == 6 || !_online) {
+        if (_page == 5 || !_online) {
             _service.refresh();
         } else {
             nextPage();
@@ -103,8 +103,7 @@ class HomePowerView extends WatchUi.View {
         else if (_page == 1) { drawSolar(dc); }
         else if (_page == 2) { drawHome(dc); }
         else if (_page == 3) { drawBattery(dc); }
-        else if (_page == 4) { drawGrid(dc); }
-        else if (_page == 5) { drawList(dc); }
+        else if (_page == 4) { drawList(dc); }
         else { drawConnection(dc); }
 
         drawFooter(dc);
@@ -163,8 +162,8 @@ class HomePowerView extends WatchUi.View {
         var w = dc.getWidth();
         var status = _loading ? "updating..." : (_online ? "updated " + _model.updatedText : "offline - cached");
 
-        dc.setColor(_online ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_RED, Graphics.COLOR_BLACK);
-        dc.drawText(w / 2, FOOTER_STATUS_Y, Graphics.FONT_XTINY, status, Graphics.TEXT_JUSTIFY_CENTER);
+        var statusColor = _online ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_RED;
+        drawScaledText(dc, w / 2, FOOTER_STATUS_Y + 2, status, Graphics.FONT_XTINY, statusColor, 0.74, Graphics.TEXT_JUSTIFY_CENTER);
 
         // Eight small dots are much safer on a round screen than a wide
         // "1/8  up/down pages" string near the lower bezel.
@@ -173,6 +172,37 @@ class HomePowerView extends WatchUi.View {
             dc.setColor(i == _page ? Graphics.COLOR_WHITE : Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
             dc.fillCircle(firstX + (i * 12), FOOTER_DOTS_Y, i == _page ? 4 : 2);
         }
+    }
+
+    // Renders text at `font`'s native size into an offscreen buffer, then
+    // blits it scaled down by `scale` - genuinely smaller than any text
+    // font this device exposes (FONT_XTINY, 37px, is the floor - see the
+    // file header comment), not just dimmer/lighter. Only worth the
+    // extra cost (an allocation + a blit per call) for text that doesn't
+    // change every frame, like the footer status line.
+    function drawScaledText(dc, x, y, text, font, color, scale, justify) {
+        var tw = dc.getTextWidthInPixels(text, font);
+        var th = dc.getFontHeight(font);
+        if (tw <= 0 || th <= 0) { return; }
+
+        var bmpRef = Graphics.createBufferedBitmap({ :width => tw, :height => th });
+        var bmp = bmpRef.get();
+        var bdc = bmp.getDc();
+        bdc.setColor(color, Graphics.COLOR_BLACK);
+        bdc.clear();
+        bdc.drawText(0, 0, font, text, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var destW = (tw * scale).toNumber();
+        var destH = (th * scale).toNumber();
+        var destX;
+        if (justify == Graphics.TEXT_JUSTIFY_RIGHT) {
+            destX = x - destW;
+        } else if (justify == Graphics.TEXT_JUSTIFY_CENTER) {
+            destX = x - (destW / 2);
+        } else {
+            destX = x;
+        }
+        dc.drawScaledBitmap(destX, y, destW, destH, bmp);
     }
 
     // The "live view" - momentary power for all four quantities, no dots
@@ -279,6 +309,53 @@ class HomePowerView extends WatchUi.View {
         dc.fillPolygon(points);
     }
 
+    // Same idea as drawDirectionalLabel, sized for a page title (FONT_SMALL)
+    // instead of the compact Overview cells (FONT_XTINY) - used by the
+    // Battery page's title to show charge/discharge direction there too.
+    function drawDirectionalTitle(dc, label, triangleBefore, color, dimColor) {
+        var w = dc.getWidth();
+        var cx = w / 2;
+        var y = 63;
+        var wordW = dc.getTextWidthInPixels(label, Graphics.FONT_SMALL);
+        var gap = 10;
+        var triLen = 17;
+        var triHalfH = 9;
+        var totalW = wordW + gap + triLen;
+        var startX = cx - (totalW / 2);
+        var cyTri = y + 26; // vertical middle of the FONT_SMALL text box
+
+        var wordX;
+        var cxTri;
+        if (triangleBefore) {
+            cxTri = startX + (triLen / 2);
+            wordX = startX + triLen + gap;
+        } else {
+            wordX = startX;
+            cxTri = startX + wordW + gap + (triLen / 2);
+        }
+
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.drawText(wordX, y, Graphics.FONT_SMALL, label, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var t = (Math.sin(_pulsePhase) + 1) / 2;
+        dc.setColor(lerpColor(dimColor, color, t), Graphics.COLOR_BLACK);
+        var points;
+        if (triangleBefore) {
+            points = [
+                [cxTri - (triLen / 2), cyTri],
+                [cxTri + (triLen / 2), cyTri - triHalfH],
+                [cxTri + (triLen / 2), cyTri + triHalfH],
+            ];
+        } else {
+            points = [
+                [cxTri + (triLen / 2), cyTri],
+                [cxTri - (triLen / 2), cyTri - triHalfH],
+                [cxTri - (triLen / 2), cyTri + triHalfH],
+            ];
+        }
+        dc.fillPolygon(points);
+    }
+
     function overviewValue(dc, x, y, number, unit) {
         // Label height (37) + 4px gap - label now starts at the cell's own
         // y (no dot above it eating space), so this replaces the old y+59.
@@ -337,15 +414,21 @@ class HomePowerView extends WatchUi.View {
 
     function drawSolar(dc) {
         title(dc, "SOLAR", SOLAR_COLOR);
-        mainMetric(dc, kwNumber(_model.solarKw), "kW");
-        drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, 4.8, 256, 60);
+        // No separate current-value line here - the pulsing dot's position
+        // on the graph already shows it, and the freed space goes to the
+        // graph instead (2026, user request: same treatment as Home below).
+        // 116 (title bottom) + 3px gap.
+        drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, 4.8, 263, 144);
         bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
     }
 
     function drawHome(dc) {
         title(dc, "HOME", HOME_COLOR);
-        mainMetric(dc, kwNumber(_model.homeKw), "kW");
-        drawBars(dc, _model.homeHistory, 3.0, 263, 40, HOME_COLOR, false);
+        // No separate current-value line here - "NOW" in the bottom row
+        // already shows it, and the freed space goes to the bars instead.
+        // 116 (title bottom) + 3px gap.
+        drawHomeStackedBars(dc, _model.homeHistory, _model.homeFromGridHistory,
+            _model.homeFromBatteryHistory, 3.0, 263, 144);
         bottomPair(dc, "TODAY", kwhNumber(_model.homeTodayKwh), "kWh", "NOW", kwNumber(_model.homeKw), "kW");
     }
 
@@ -353,10 +436,32 @@ class HomePowerView extends WatchUi.View {
         var w = dc.getWidth();
         var cx = w / 2;
 
-        title(dc, "BATTERY", BATTERY_VIOLET);
+        var charging = _model.batteryKw > 0.02;
+        var discharging = _model.batteryKw < -0.02;
+
+        // Title carries the same pulsing direction triangle as Overview's
+        // Battery cell (2026, user request: "like you did with grid").
+        if (charging || discharging) {
+            var titleDim = charging ? 0x2E3134 : 0x3A2550;
+            var titleColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
+            drawDirectionalTitle(dc, "BATTERY", discharging, titleColor, titleDim);
+        } else {
+            title(dc, "BATTERY", BATTERY_VIOLET);
+        }
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 120, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, 116, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
+
+        // Low/high SOC thresholds, genuinely smaller than any real text
+        // font via drawScaledText (see its own comment) - a full XTINY
+        // row wouldn't fit the vertical budget here alongside everything
+        // else this page needs. LOW sits over the bar's left edge (where
+        // its floor tick is), HIGH over the right edge (its ceiling tick).
+        // 116 (percent offset) + 61 (FONT_MEDIUM height) + 2px gap.
+        drawScaledText(dc, SAFE_LEFT, 179, "LOW " + _model.batteryFloorPct.format("%d") + "%",
+            Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.55, Graphics.TEXT_JUSTIFY_LEFT);
+        drawScaledText(dc, SAFE_RIGHT, 179, "HIGH " + _model.batteryMaxPct.format("%d") + "%",
+            Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.55, Graphics.TEXT_JUSTIFY_RIGHT);
 
         // Horizontal fill bar instead of a circular gauge - the arc-angle
         // direction semantics on this device didn't behave as documented
@@ -364,10 +469,10 @@ class HomePowerView extends WatchUi.View {
         // sliver instead), so this reuses the same plain rectangle-fill
         // approach already proven by drawBars elsewhere in this file. This
         // shows state of charge, not direction, so it stays the battery's
-        // identity violet regardless of charge/discharge.
-        // 120 (percent offset) + 61 (FONT_MEDIUM height) + 6px gap.
-        var barY = 187;
-        var barH = 18;
+        // identity violet regardless of charge/discharge. Floor/ceiling
+        // ticks mark the low/high thresholds labeled above.
+        var barY = 206;
+        var barH = 16;
         var barW = SAFE_RIGHT - SAFE_LEFT;
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
         dc.drawRoundedRectangle(SAFE_LEFT, barY, barW, barH, 6);
@@ -375,54 +480,210 @@ class HomePowerView extends WatchUi.View {
         dc.setColor(BATTERY_VIOLET, Graphics.COLOR_BLACK);
         dc.fillRoundedRectangle(SAFE_LEFT, barY, fillW, barH, 6);
 
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+        dc.setPenWidth(2);
+        var floorX = SAFE_LEFT + ((barW * _model.batteryFloorPct) / 100);
+        dc.drawLine(floorX, barY - 4, floorX, barY + barH + 4);
+        var maxX = SAFE_LEFT + ((barW * _model.batteryMaxPct) / 100);
+        dc.drawLine(maxX, barY - 4, maxX, barY + barH + 4);
+        dc.setPenWidth(1);
+
         // Rate DOES encode direction, so it switches color same as the
         // Overview cell: violet discharging, grey charging.
-        var rateColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
-        // 187 + 18 (bar height) + 12px gap.
-        drawSplitUnit(dc, cx, 217, signedKwNumber(_model.batteryKw), "kW", Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
+        var rateColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
+        // 206 + 16 (bar height) + 9px gap.
+        drawSplitUnit(dc, cx, 231, signedKwNumber(_model.batteryKw), "kW", Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
             rateColor, Graphics.TEXT_JUSTIFY_CENTER);
 
-        // 217 + 61 (FONT_MEDIUM height) + 12px gap.
-        bottomPairAt(dc, 290, "TO FULL", minutes(_model.batteryMinutesToFull), "",
+        // Time to the applicable limit for the CURRENT direction - "to
+        // full" while charging, "to empty" (reaching the low-SOC floor)
+        // while discharging (2026, user request). Idle keeps showing "TO
+        // FULL" (its existing default) since there's no discharge rate to
+        // project an empty-time from.
+        var timeLabel = discharging ? "TO EMPTY" : "TO FULL";
+        var timeVal = discharging ? _model.batteryMinutesToEmpty : _model.batteryMinutesToFull;
+        // 231 + 61 (FONT_MEDIUM height) + 4px gap.
+        bottomPairAt(dc, 296, timeLabel, minutes(timeVal), "",
             "CAPACITY", kwhNumber(_model.batteryCapacityKwh), "kWh");
     }
 
-    function drawGrid(dc) {
-        // Grid is always this one orange in the web app - not direction-
-        // dependent. The bar chart still shows import vs export via bar
-        // position (above/below the baseline), just no longer via color.
-        title(dc, "GRID", BRAND_ORANGE);
-        mainMetric(dc, signedKwNumber(_model.gridKw), "kW");
-
-        drawBars(dc, _model.gridHistory, 3.5, 263, 32, BRAND_ORANGE, true);
-        bottomPair(dc, "EXPORTED", kwhNumber(_model.exportedTodayKwh), "kWh",
-            "IMPORTED", kwhNumber(_model.importedTodayKwh), "kWh");
-    }
-
-    // Single-line rows (dot + label left, value right). Values are kept
-    // short deliberately: a long combined string (e.g. battery % plus its
-    // charge rate) is wide enough at this font to run into the label on
-    // its left - the full charge-rate detail lives on the Battery page.
+    // Today's consumption-by-source breakdown, matching the web app's
+    // Dashboard "today" tile (2026, user request): total consumption,
+    // produced, then Grid/PV direct/From battery/To battery/To grid each
+    // with their kWh (and, except To grid - which the web tile doesn't
+    // percentage either - a % computed here from the kWh figures already
+    // provided, no separate percentage fields needed from the backend).
+    // From/To battery share one "BATTERY" label with a small triangle
+    // instead of separate words, the same direction-via-triangle idea
+    // used on Overview/Battery - down for "from" (flowing out), up for
+    // "to" (flowing in).
     function drawList(dc) {
-        var batteryColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
+        var w = dc.getWidth();
+        var cx = w / 2;
 
-        listRow(dc, 66, "SOLAR", kwNumber(_model.solarKw), "kW", SOLAR_COLOR);
-        listRow(dc, 138, "HOME", kwNumber(_model.homeKw), "kW", HOME_COLOR);
-        listRow(dc, 210, "GRID", signedKwNumber(_model.gridKw), "kW", BRAND_ORANGE);
-        listRow(dc, 282, "BATTERY", _model.batteryPct.format("%d") + "%", "", batteryColor);
+        title(dc, "TODAY", Graphics.COLOR_WHITE);
+
+        // 116 (title bottom) + 3px gap. "kWh" sits AFTER the number,
+        // vertically centered against it (2026, user request - not
+        // bottom-aligned like before, and not stacked underneath either)
+        // via the same measure-both-then-center-the-pair trick, with the
+        // unit's y nudged so its (shorter) scaled bitmap's midpoint lines
+        // up with the number's midpoint instead of sharing its top.
+        var totalNum = kwhNumber(_model.homeTodayKwh);
+        var totalNumW = dc.getTextWidthInPixels(totalNum, Graphics.FONT_SMALL);
+        var unitScale = 0.55;
+        var unitW = (dc.getTextWidthInPixels(" kWh", Graphics.FONT_XTINY) * unitScale).toNumber();
+        var totalStartX = cx - ((totalNumW + unitW) / 2);
+        var numH = dc.getFontHeight(Graphics.FONT_SMALL);
+        var unitH = (dc.getFontHeight(Graphics.FONT_XTINY) * unitScale).toNumber();
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+        dc.drawText(totalStartX, 119, Graphics.FONT_SMALL, totalNum, Graphics.TEXT_JUSTIFY_LEFT);
+        drawScaledText(dc, totalStartX + totalNumW, 119 + ((numH - unitH) / 2), " kWh", Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, unitScale, Graphics.TEXT_JUSTIFY_LEFT);
+
+        dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
+        dc.fillCircle(SAFE_LEFT + 4, 190, 4);
+        // 119 + 53 (FONT_SMALL height) + 4px gap.
+        drawScaledText(dc, SAFE_LEFT + 14, 176, kwhNumber(_model.solarTodayKwh) + " kWh produced",
+            Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.78, Graphics.TEXT_JUSTIFY_LEFT);
+
+        // Percentages only where they add up to a sensible whole - Grid +
+        // PV direct + From battery is "where today's consumption came
+        // from" (2026, user request: the other two rows are production
+        // allocation, a different base, confusing side by side with these).
+        var home = _model.homeTodayKwh;
+        var gridPct = pct(_model.importedTodayKwh, home);
+        var pvPct = pct(_model.solarDirectTodayKwh, home);
+        var fromBattPct = pct(_model.batteryDischargedTodayKwh, home);
+
+        var rowY = 212;
+        var rowStep = 31;
+        // Grid uses todayRowGrid (triangle AFTER the word, matching the
+        // Overview page's own Grid cell - "GRID ->" importing / "GRID <-"
+        // exporting). Battery keeps the triangle in the shared left
+        // marker column (todayRowTriangle) alongside the plain dot rows.
+        todayRowGrid(dc, rowY, false, BRAND_ORANGE, _model.importedTodayKwh, gridPct);
+        rowY += rowStep;
+        todayRow(dc, rowY, "direct PV", SOLAR_COLOR, _model.solarDirectTodayKwh, pvPct);
+        rowY += rowStep;
+        todayRowTriangle(dc, rowY, "BATT", false, BATTERY_VIOLET, _model.batteryDischargedTodayKwh, fromBattPct);
+        rowY += rowStep;
+        todayRowTriangle(dc, rowY, "BATT", true, BATTERY_CHARGE_GREY, _model.batteryChargedTodayKwh, "");
+        rowY += rowStep;
+        todayRowGrid(dc, rowY, true, BRAND_ORANGE, _model.exportedTodayKwh, "");
     }
 
-    function listRow(dc, y, label, number, unit, color) {
-        var w = dc.getWidth();
+    // kWh as a % of `base` (home consumption for most rows, today's total
+    // production for "to battery" - matches the web app's own "% of
+    // production" wording there). "" when base isn't usable, rather than
+    // a misleading 0%.
+    function pct(value, base) {
+        if (base == null || base <= 0 || value == null) { return ""; }
+        // Round to nearest, not truncate - matches the web app's
+        // Math.round(value/base*100) exactly (Dashboard.jsx).
+        return (((value / base * 100) + 0.5).toNumber()) + "%";
+    }
+
+    function todayRow(dc, y, label, color, kwhValue, pctText) {
         dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.fillCircle(99, y + 18, 5);
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(117, y, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_LEFT);
-        drawSplitUnit(dc, w - 96, y, number, unit, Graphics.FONT_TINY, Graphics.FONT_XTINY,
-            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_RIGHT);
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
-        // + 47 (FONT_TINY height, the taller of the two) + 5px gap.
-        dc.drawLine(92, y + 52, w - 92, y + 52);
+        dc.fillCircle(SAFE_LEFT + 4, y + 12, 4);
+        todayRowText(dc, y, label, kwhValue, pctText);
+    }
+
+    // Triangle sits at the exact same marker spot todayRow's plain dot
+    // does - only which way it points changes, label and value stay at
+    // their usual fixed positions. `charging` = points right, "towards"
+    // the label that follows (charging the battery, exporting to grid -
+    // flowing INTO the thing named); false = points left, "outwards" away
+    // from it (discharging, importing - flowing OUT of it).
+    function todayRowTriangle(dc, y, label, charging, color, kwhValue, pctText) {
+        var cxTri = SAFE_LEFT + 4;
+        var cyTri = y + 10;
+        var triLen = 9;
+        var triHalfH = 5;
+
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        var points;
+        if (charging) {
+            points = [[cxTri + (triLen / 2), cyTri], [cxTri - (triLen / 2), cyTri - triHalfH], [cxTri - (triLen / 2), cyTri + triHalfH]];
+        } else {
+            points = [[cxTri - (triLen / 2), cyTri], [cxTri + (triLen / 2), cyTri - triHalfH], [cxTri + (triLen / 2), cyTri + triHalfH]];
+        }
+        dc.fillPolygon(points);
+        todayRowText(dc, y, label, kwhValue, pctText);
+    }
+
+    // Grid's own row style: the triangle sits AFTER the word "GRID"
+    // (matching the Overview page's own Grid cell - "GRID ->" importing
+    // / "GRID <-" exporting - 2026, user request for consistency between
+    // the two views), not in the shared left marker column the dot/
+    // triangle rows use. The label still starts at the SAME x as every
+    // other row's label (SAFE_LEFT+14) so the names stay in one column
+    // (2026, user request) - only the triangle's position differs.
+    function todayRowGrid(dc, y, exporting, color, kwhValue, pctText) {
+        var labelX = SAFE_LEFT + 14;
+        var labelScale = 0.62;
+        drawScaledText(dc, labelX, y, "GRID", Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, labelScale, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var labelW = (dc.getTextWidthInPixels("GRID", Graphics.FONT_XTINY) * labelScale).toNumber();
+        var gap = 6;
+        var triLen = 9;
+        var triHalfH = 5;
+        var cxTri = labelX + labelW + gap + (triLen / 2);
+        var cyTri = y + 10;
+
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        var points;
+        if (exporting) {
+            points = [[cxTri - (triLen / 2), cyTri], [cxTri + (triLen / 2), cyTri - triHalfH], [cxTri + (triLen / 2), cyTri + triHalfH]];
+        } else {
+            points = [[cxTri + (triLen / 2), cyTri], [cxTri - (triLen / 2), cyTri - triHalfH], [cxTri - (triLen / 2), cyTri + triHalfH]];
+        }
+        dc.fillPolygon(points);
+
+        todayValueText(dc, y, kwhValue, pctText);
+    }
+
+    function todayRowText(dc, y, label, kwhValue, pctText) {
+        drawScaledText(dc, SAFE_LEFT + 14, y, label, Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.62, Graphics.TEXT_JUSTIFY_LEFT);
+        todayValueText(dc, y, kwhValue, pctText);
+    }
+
+    // Three fixed right-justified columns, reserved the same for every
+    // row regardless of whether that row actually has a percentage - the
+    // number's column always ends at `numberRightX`, so digit-count
+    // differences between rows never shift it (2026, user report: "the
+    // last two have the kWs under the percentages"). "kWh" always
+    // follows the number, smaller/dimmer (2026, user request), in its
+    // own reserved slot; the percentage, when present, gets the
+    // outermost slot.
+    function todayValueText(dc, y, kwhValue, pctText) {
+        var numScale = 0.58;
+        var unitScale = 0.42;
+        var pctScale = 0.46;
+
+        var pctColW = (dc.getTextWidthInPixels("100%", Graphics.FONT_TINY) * pctScale).toNumber() + 6;
+        var unitColW = (dc.getTextWidthInPixels(" kWh", Graphics.FONT_TINY) * unitScale).toNumber() + 4;
+        var unitRightX = SAFE_RIGHT - pctColW;
+        var numberRightX = unitRightX - unitColW;
+
+        // "kWh" is a shorter scaled bitmap than the number (drawScaledText
+        // always blits from the TOP), so top-aligning both at the same y
+        // leaves the unit looking pinned to the number's top instead of
+        // centered on it (2026, user report) - nudge the unit down by half
+        // the height difference to vertically center it against the number.
+        var numH = (dc.getFontHeight(Graphics.FONT_TINY) * numScale).toNumber();
+        var unitH = (dc.getFontHeight(Graphics.FONT_TINY) * unitScale).toNumber();
+        var unitY = y + ((numH - unitH) / 2);
+
+        drawScaledText(dc, numberRightX, y, kwhValue.format("%.2f"), Graphics.FONT_TINY, Graphics.COLOR_WHITE,
+            numScale, Graphics.TEXT_JUSTIFY_RIGHT);
+        drawScaledText(dc, unitRightX, unitY, " kWh", Graphics.FONT_TINY, Graphics.COLOR_LT_GRAY,
+            unitScale, Graphics.TEXT_JUSTIFY_RIGHT);
+        if (!pctText.equals("")) {
+            drawScaledText(dc, SAFE_RIGHT, y, pctText, Graphics.FONT_TINY, Graphics.COLOR_WHITE,
+                pctScale, Graphics.TEXT_JUSTIFY_RIGHT);
+        }
     }
 
     function drawConnection(dc) {
@@ -466,41 +727,88 @@ class HomePowerView extends WatchUi.View {
     function mainMetric(dc, number, unit) {
         var w = dc.getWidth();
         var cx = w / 2;
-        // 63 (title offset) + 53 (FONT_SMALL height) + 9px gap.
-        drawSplitUnit(dc, cx, 125, number, unit, Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
+        // 63 (title offset) + 53 (FONT_SMALL height) + 7px gap, nudged up
+        // 2px further per user request.
+        drawSplitUnit(dc, cx, 121, number, unit, Graphics.FONT_SMALL, Graphics.FONT_XTINY,
             Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
-    function drawBars(dc, values, maxAbs, baselineY, maxH, color, signed) {
+    // 24 fixed hourly slots (not just however many samples exist - matches
+    // the Solar day graph's reasoning: future hours stay visibly blank
+    // instead of the chart being squeezed to however much of the day has
+    // happened). Each hour's bar is stacked grid (base) + battery (middle)
+    // + solar (top, the remainder: total - grid - battery) - the same
+    // visual language as the web app's Dashboard "consumption by source"
+    // stacked bars, per-hour instead of per-day (2026, user request).
+    function drawHomeStackedBars(dc, totalValues, gridValues, battValues, maxAbs, baselineY, maxH) {
         var left = SAFE_LEFT;
         var right = SAFE_RIGHT;
         var chartW = right - left;
-        var count = values.size();
-        if (count <= 0) { return; }
-
-        var gap = 2;
-        var barW = ((chartW - ((count - 1) * gap)) / count).toNumber();
-        if (barW < 3) { barW = 3; }
+        var slots = 24;
+        var gap = 1;
+        var slotW = ((chartW - ((slots - 1) * gap)) / slots).toNumber();
+        if (slotW < 2) { slotW = 2; }
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
         dc.drawLine(left, baselineY, right, baselineY);
 
-        for (var i = 0; i < count; i += 1) {
-            var v = values[i].toFloat();
-            var h = ((v.abs() / maxAbs) * maxH).toNumber();
-            if (h < 2) { h = 2; }
-            if (h > maxH) { h = maxH; }
+        var count = totalValues.size();
+        var gridCount = gridValues.size();
+        var battCount = battValues.size();
+        var hours = slots < count ? slots : count;
 
-            var x = left + i * (barW + gap);
-            dc.setColor(color, Graphics.COLOR_BLACK);
-            // Direction (e.g. grid import vs export) is shown by bar
-            // position - above or below the baseline - not by color; both
-            // sides share the series' one color, matching the web app's
-            // single-color-per-category convention.
-            if (signed && v > 0) {
-                dc.fillRectangle(x, baselineY, barW, h);
-            } else {
-                dc.fillRectangle(x, baselineY - h, barW, h);
+        for (var i = 0; i < hours; i += 1) {
+            var total = totalValues[i].toFloat().abs();
+            // Nearest-neighbor resample grid/batt onto totalValues' own
+            // index range - same fix as the Solar graph's battery band:
+            // these can be a different (e.g. still-demo-fallback) length
+            // than totalValues, and indexing position-for-position would
+            // silently zero out every hour past the shorter array's end
+            // instead of scaling across the full range.
+            var gridIdx = (hours > 1 && gridCount > 1)
+                ? Math.round((i.toFloat() / (hours - 1)) * (gridCount - 1)).toNumber()
+                : 0;
+            var battIdx = (hours > 1 && battCount > 1)
+                ? Math.round((i.toFloat() / (hours - 1)) * (battCount - 1)).toNumber()
+                : 0;
+            var gridV = (gridCount > 0) ? gridValues[gridIdx].toFloat().abs() : 0.0;
+            var battV = (battCount > 0) ? battValues[battIdx].toFloat().abs() : 0.0;
+            // Guard against stale/inconsistent data the same way the Solar
+            // graph does - the two parts can't add up to more than total.
+            if (gridV > total) { gridV = total; }
+            if (battV > total - gridV) { battV = total - gridV; }
+            var solarV = total - gridV - battV;
+            if (solarV < 0) { solarV = 0.0; }
+
+            var x = left + (i * (slotW + gap));
+            var gridH = ((gridV / maxAbs) * maxH).toNumber();
+            var battH = ((battV / maxAbs) * maxH).toNumber();
+            var solarH = ((solarV / maxAbs) * maxH).toNumber();
+            var stackH = gridH + battH + solarH;
+            if (stackH > maxH) {
+                // Clamp the whole stack proportionally rather than letting
+                // it overshoot maxH (possible once rounding each piece up
+                // separately).
+                var fix = maxH.toFloat() / stackH;
+                gridH = (gridH * fix).toNumber();
+                battH = (battH * fix).toNumber();
+                solarH = (solarH * fix).toNumber();
+            }
+
+            var y = baselineY;
+            if (gridH > 0) {
+                dc.setColor(BRAND_ORANGE, Graphics.COLOR_BLACK);
+                dc.fillRectangle(x, y - gridH, slotW, gridH);
+                y -= gridH;
+            }
+            if (battH > 0) {
+                dc.setColor(BATTERY_VIOLET, Graphics.COLOR_BLACK);
+                dc.fillRectangle(x, y - battH, slotW, battH);
+                y -= battH;
+            }
+            if (solarH > 0) {
+                dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
+                dc.fillRectangle(x, y - solarH, slotW, solarH);
             }
         }
     }
@@ -528,17 +836,31 @@ class HomePowerView extends WatchUi.View {
         var nowFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
         var nowX = left + (nowFrac * chartW);
 
+        // `count` is driven by totalValues alone - the total production
+        // line and "now" dot must always use every real point it has.
+        // battValues can be a different length (e.g. still the static
+        // demo fallback while the backend doesn't send this field yet -
+        // see WATCH.readme follow-up 2) and gets nearest-neighbor
+        // resampled onto the same x-grid instead of clamping totalValues
+        // down to it, which previously silently discarded the most
+        // recent real hours whenever the two arrays' lengths differed.
         var count = totalValues.size();
-        if (battValues.size() < count) { count = battValues.size(); }
         if (count <= 0) { return; }
+        var battCount = battValues.size();
 
         var xs = new [count];
         var battYs = new [count];
         var totalYs = new [count];
         for (var i = 0; i < count; i += 1) {
             xs[i] = (count > 1) ? (left + ((i.toFloat() / (count - 1)) * (nowX - left))) : nowX;
-            var battVal = battValues[i];
             var totalVal = totalValues[i];
+            var battVal = 0.0;
+            if (battCount > 0) {
+                var battIdx = (count > 1 && battCount > 1)
+                    ? Math.round((i.toFloat() / (count - 1)) * (battCount - 1)).toNumber()
+                    : 0;
+                battVal = battValues[battIdx];
+            }
             // Guard against stale/inconsistent data (battery portion
             // shouldn't ever exceed total production for the same sample).
             if (battVal.toFloat().abs() > totalVal.toFloat().abs()) { battVal = totalVal; }

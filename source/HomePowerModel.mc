@@ -12,6 +12,23 @@ class HomePowerModel {
     var importedTodayKwh = 6.4;
     var batteryCapacityKwh = 14.2;
     var batteryMinutesToFull = 195;
+    // Mirror of batteryMinutesToFull for the discharging direction - time
+    // until the account's (effective) low-SOC floor at the current
+    // discharge rate. Battery page shows whichever of the two actually
+    // applies to the current charge/discharge direction.
+    var batteryMinutesToEmpty = 340;
+    // Low/high SOC thresholds for the Battery page's fill-bar markers -
+    // the account's effective discharge floor and charge ceiling, not
+    // bare 0/100.
+    var batteryFloorPct = 10;
+    var batteryMaxPct = 95;
+    // Today's consumption-by-source breakdown (List page) - solarTodayKwh
+    // is TOTAL production, this is the direct-to-home portion of it;
+    // battery's two directions (cells discharged to the house vs PV
+    // charged into it) for the same "today" window.
+    var solarDirectTodayKwh = 6.9;
+    var batteryDischargedTodayKwh = 3.8;
+    var batteryChargedTodayKwh = 9.2;
     var updatedText = "--:--";
 
     var solarHistory = [0.4,0.7,1.1,1.8,2.6,3.4,4.0,4.4,4.6,4.5,4.2,3.8,3.0,2.1,1.2,0.5];
@@ -23,6 +40,12 @@ class HomePowerModel {
     // the backend repo: not sent by the live API yet, so this demo curve
     // is also the fallback when the field is absent).
     var solarBatteryHistory = [0.0,0.1,0.3,0.6,0.9,1.2,1.4,1.5,1.5,1.4,1.2,0.9,0.6,0.3,0.1,0.0];
+    // Home's two non-solar sources, same index/cadence as homeHistory -
+    // the Home page stacks grid (base) + battery (middle) + the remainder
+    // as PV->home (top, computed client-side: homeHistory[i] -
+    // homeFromGridHistory[i] - homeFromBatteryHistory[i]).
+    var homeFromGridHistory = [1.2,1.6,1.3,1.1,1.0,1.2,1.4,1.3,0.8,0.4,0.2,0.1,0.1,0.2,0.5,0.9];
+    var homeFromBatteryHistory = [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.2,0.4,0.3,0.2,0.1,0.1,0.2,0.3,0.2];
 
     function initialize() {
         stampNow();
@@ -57,6 +80,12 @@ class HomePowerModel {
         importedTodayKwh = getFloat(data, "importedToday", importedTodayKwh);
         batteryCapacityKwh = getFloat(data, "batteryCapacity", batteryCapacityKwh);
         batteryMinutesToFull = getNumber(data, "batteryMinutesToFull", batteryMinutesToFull);
+        batteryMinutesToEmpty = getNumber(data, "batteryMinutesToEmpty", batteryMinutesToEmpty);
+        batteryFloorPct = getNumber(data, "batteryFloorPct", batteryFloorPct);
+        batteryMaxPct = getNumber(data, "batteryMaxPct", batteryMaxPct);
+        solarDirectTodayKwh = getFloat(data, "solarDirectToday", solarDirectTodayKwh);
+        batteryDischargedTodayKwh = getFloat(data, "batteryDischargedToday", batteryDischargedTodayKwh);
+        batteryChargedTodayKwh = getFloat(data, "batteryChargedToday", batteryChargedTodayKwh);
 
         if (data.hasKey("solarHistory") && data["solarHistory"] != null) {
             solarHistory = data["solarHistory"];
@@ -66,6 +95,12 @@ class HomePowerModel {
         }
         if (data.hasKey("homeHistory") && data["homeHistory"] != null) {
             homeHistory = data["homeHistory"];
+        }
+        if (data.hasKey("homeFromGridHistory") && data["homeFromGridHistory"] != null) {
+            homeFromGridHistory = data["homeFromGridHistory"];
+        }
+        if (data.hasKey("homeFromBatteryHistory") && data["homeFromBatteryHistory"] != null) {
+            homeFromBatteryHistory = data["homeFromBatteryHistory"];
         }
         if (data.hasKey("gridHistory") && data["gridHistory"] != null) {
             gridHistory = data["gridHistory"];
