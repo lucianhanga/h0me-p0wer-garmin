@@ -1,0 +1,12 @@
+# Garmin Connect IQ build output
+bin/
+
+# Developer signing keys - never commit these
+*.der
+*.jwt
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/

@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="1">
+    <iq:application
+        id="f2a7b2a0e9a7486ca9b28be73b68b1f4"
+        type="watch-app"
+        name="@Strings.AppName"
+        entry="HomePowerApp"
+        launcherIcon="@Drawables.LauncherIcon"
+        minSdkVersion="6.0.0">
+        <iq:products>
+            <iq:product id="fenix847mm"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="Communications"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+        <iq:barrels/>
+    </iq:application>
+</iq:manifest>
