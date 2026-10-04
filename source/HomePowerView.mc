@@ -168,10 +168,12 @@ class HomePowerView extends WatchUi.View {
         }
     }
 
-    // Two stacked rows of two cells. Each cell is a dot + label line (XTINY)
-    // + one combined "value unit" line (SMALL) - kept to two lines total so
-    // it fits the ~120px row budget the round display leaves above/below
-    // the header and footer bands.
+    // The "live view" - momentary power for all four quantities, no dots
+    // (the label's own color already carries the category identity), no
+    // +/- signs on the numbers (direction is conveyed by the Grid arrow
+    // and Battery symbol instead). Each cell is a label line (XTINY) +
+    // one "value unit" line (SMALL) - two lines total, same budget as
+    // before now that removing the dot freed ~18px per cell.
     function drawOverview(dc) {
         var w = dc.getWidth();
         var cx = w / 2;
@@ -184,32 +186,110 @@ class HomePowerView extends WatchUi.View {
         dc.drawLine(cx, 64, cx, 366);
         dc.drawLine(92, 217, w - 92, 217);
 
-        overviewCellUnit(dc, leftX, row1Y, "SOLAR", kwNumber(_model.solarKw), "kW", SOLAR_COLOR);
-        overviewCellUnit(dc, rightX, row1Y, "HOME", kwNumber(_model.homeKw), "kW", HOME_COLOR);
+        overviewLabel(dc, leftX, row1Y, "SOLAR", SOLAR_COLOR);
+        overviewValue(dc, leftX, row1Y, kwNumber(_model.solarKw), "kW");
 
-        // Grid is always this one orange in the web app - not direction-
-        // dependent. Import vs export is conveyed by the sign, not color.
-        overviewCellUnit(dc, leftX, row2Y, "GRID", signedKwNumber(_model.gridKw), "kW", BRAND_ORANGE);
+        overviewLabel(dc, rightX, row1Y, "HOME", HOME_COLOR);
+        overviewValue(dc, rightX, row1Y, kwNumber(_model.homeKw), "kW");
 
-        // Charge/discharge rate, styled identically to Solar/Home/Grid
-        // (2026, user request: "how much you pull from battery too" -
-        // the Live tab equivalent on the phone app shows this rate, not
-        // just the charge %, which stays available on the Battery page).
-        // Violet when discharging, grey when charging - the web app's own
-        // battery color convention (see the constants above).
-        var batteryColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
-        overviewCellUnit(dc, rightX, row2Y, "BATTERY", signedKwNumber(_model.batteryKw), "kW", batteryColor);
+        // "<- GRID" (exporting/pushing, triangle before the word) or
+        // "GRID ->" (importing/pulling, triangle after) - direction via a
+        // drawn, pulsing triangle instead of a +/- sign.
+        var exporting = _model.gridKw < 0;
+        drawDirectionalLabel(dc, leftX, row2Y, "GRID", exporting, BRAND_ORANGE, 0x4A3018);
+        overviewValue(dc, leftX, row2Y, kwNumber(_model.gridKw.abs()), "kW");
+
+        // Charge/discharge rate (2026, user request: "how much you pull
+        // from battery too" - the Live tab equivalent on the phone app
+        // shows this rate, not just the charge %, which stays available
+        // on the Battery page). Same triangle-before/after-word pattern
+        // as Grid: discharging (out of the battery) mirrors "exporting" -
+        // triangle before the word; charging (into the battery) mirrors
+        // "importing" - triangle after. Violet discharging, grey
+        // charging/idle, the web app's own battery color convention.
+        var charging = _model.batteryKw > 0.02;
+        var discharging = _model.batteryKw < -0.02;
+        var batteryColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
+        if (charging || discharging) {
+            var dim = charging ? 0x2E3134 : 0x3A2550;
+            drawDirectionalLabel(dc, rightX, row2Y, "BATTERY", discharging, batteryColor, dim);
+        } else {
+            overviewLabel(dc, rightX, row2Y, "BATTERY", BATTERY_CHARGE_GREY);
+        }
+        overviewValue(dc, rightX, row2Y, kwNumber(_model.batteryKw.abs()), "kW");
     }
 
-    // Dot + label line (XTINY), then number+unit on one line, unit smaller
-    // than the number (e.g. "4.20" at FONT_SMALL next to "kW" at FONT_XTINY).
-    function overviewCellUnit(dc, x, y, label, number, unit, color) {
+    function overviewLabel(dc, x, y, label, color) {
         dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.fillCircle(x, y + 7, 5);
-        dc.drawText(x, y + 18, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(x, y, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
+    }
 
-        drawSplitUnit(dc, x, y + 59, number, unit, Graphics.FONT_SMALL, Graphics.FONT_XTINY,
+    // `word` + a drawn triangle, pulsing between `dimColor` and `color` -
+    // a filled polygon rather than a text arrow glyph, since font arrow
+    // glyph support isn't guaranteed on this device. `triangleBefore`
+    // puts a left-pointing triangle before the word (e.g. Grid exporting,
+    // Battery discharging - both "flowing out"); false puts a
+    // right-pointing triangle after it (Grid importing, Battery charging
+    // - both "flowing in"). Shared by the Grid and Battery cells.
+    function drawDirectionalLabel(dc, x, y, word, triangleBefore, color, dimColor) {
+        var wordW = dc.getTextWidthInPixels(word, Graphics.FONT_XTINY);
+        var gap = 8;
+        var triLen = 13;
+        var triHalfH = 7;
+        var totalW = wordW + gap + triLen;
+        var startX = x - (totalW / 2);
+        var cyTri = y + 18; // vertical middle of the FONT_XTINY text box
+
+        var wordX;
+        var cxTri;
+        if (triangleBefore) {
+            cxTri = startX + (triLen / 2);
+            wordX = startX + triLen + gap;
+        } else {
+            wordX = startX;
+            cxTri = startX + wordW + gap + (triLen / 2);
+        }
+
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.drawText(wordX, y, Graphics.FONT_XTINY, word, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var t = (Math.sin(_pulsePhase) + 1) / 2; // 0..1 breathing factor
+        dc.setColor(lerpColor(dimColor, color, t), Graphics.COLOR_BLACK);
+        var points;
+        if (triangleBefore) {
+            points = [
+                [cxTri - (triLen / 2), cyTri],
+                [cxTri + (triLen / 2), cyTri - triHalfH],
+                [cxTri + (triLen / 2), cyTri + triHalfH],
+            ];
+        } else {
+            points = [
+                [cxTri + (triLen / 2), cyTri],
+                [cxTri - (triLen / 2), cyTri - triHalfH],
+                [cxTri - (triLen / 2), cyTri + triHalfH],
+            ];
+        }
+        dc.fillPolygon(points);
+    }
+
+    function overviewValue(dc, x, y, number, unit) {
+        // Label height (37) + 4px gap - label now starts at the cell's own
+        // y (no dot above it eating space), so this replaces the old y+59.
+        drawSplitUnit(dc, x, y + 41, number, unit, Graphics.FONT_SMALL, Graphics.FONT_XTINY,
             Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    function lerpColor(fromColor, toColor, t) {
+        var r1 = (fromColor >> 16) & 0xFF;
+        var g1 = (fromColor >> 8) & 0xFF;
+        var b1 = fromColor & 0xFF;
+        var r2 = (toColor >> 16) & 0xFF;
+        var g2 = (toColor >> 8) & 0xFF;
+        var b2 = toColor & 0xFF;
+        var r = (r1 + ((r2 - r1) * t)).toNumber();
+        var g = (g1 + ((g2 - g1) * t)).toNumber();
+        var b = (b1 + ((b2 - b1) * t)).toNumber();
+        return (r << 16) | (g << 8) | b;
     }
 
     // Draws "number unit" (e.g. "4.20 kW") with the unit in a smaller font
