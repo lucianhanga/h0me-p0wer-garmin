@@ -131,6 +131,13 @@ class HomePowerView extends WatchUi.View {
     const BATTERY_VIOLET = 0xC084FC;
     const BATTERY_CHARGE_GREY = 0x8B98A5;
 
+    // Solar page's production graph: same stacked-area split the web app's
+    // Graph tab uses for "Power Production" (web/src/graph/GraphTab.jsx) -
+    // PV-to-battery stacked under PV-to-home, with the total production
+    // traced as a plain line on top in the standard PV green above.
+    const PV_BATTERY_BAND = 0x3DA568;
+    const PV_HOME_BAND = 0x8EE3A8;
+
     function drawHeader(dc) {
         var w = dc.getWidth();
         var font = Graphics.FONT_XTINY;
@@ -331,7 +338,7 @@ class HomePowerView extends WatchUi.View {
     function drawSolar(dc) {
         title(dc, "SOLAR", SOLAR_COLOR);
         mainMetric(dc, kwNumber(_model.solarKw), "kW");
-        drawDayGraph(dc, _model.solarHistory, 4.8, 256, 60, SOLAR_COLOR);
+        drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, 4.8, 256, 60);
         bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
     }
 
@@ -498,16 +505,18 @@ class HomePowerView extends WatchUi.View {
         }
     }
 
-    // Line graph spanning the full day (0h-24h fixed on the x-axis, not
-    // just however many samples exist) rather than a bar chart (2026, user
-    // request - Solar specifically). `values` are assumed to be evenly
-    // spaced samples from midnight up to now, so they're plotted between
-    // the left edge (0h) and a "now" x position derived from the actual
-    // clock - not the right edge - leaving the remaining hours of the day
-    // visibly blank. A pulsing dot marks today's most recent sample at
-    // that "now" x position, since the line stops there rather than
-    // reaching the end of the chart like a completed day's data would.
-    function drawDayGraph(dc, values, maxAbs, baselineY, maxH, color) {
+    // Stacked-area day graph spanning the full day (0h-24h fixed on the
+    // x-axis, not just however many samples exist): PV-to-battery stacked
+    // under PV-to-home, total production traced on top - same composition
+    // as the web app's Graph tab "Power Production" chart
+    // (web/src/graph/GraphTab.jsx), ported to a midnight-to-now x-axis
+    // with a pulsing "now" dot instead of that chart's trailing-24h window
+    // (which has no such marker - see the comment on drawSolarDayGraph's
+    // call site). `totalValues`/`battValues` are assumed evenly spaced
+    // samples from midnight up to now, so they're plotted between the
+    // left edge (0h) and a "now" x position derived from the actual clock
+    // - not the chart's right edge - leaving the remaining hours blank.
+    function drawSolarDayGraph(dc, totalValues, battValues, maxAbs, baselineY, maxH) {
         var left = SAFE_LEFT;
         var right = SAFE_RIGHT;
         var chartW = right - left;
@@ -519,38 +528,57 @@ class HomePowerView extends WatchUi.View {
         var nowFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
         var nowX = left + (nowFrac * chartW);
 
-        var count = values.size();
+        var count = totalValues.size();
+        if (battValues.size() < count) { count = battValues.size(); }
         if (count <= 0) { return; }
 
-        var lastX = nowX;
-        var lastY = dayGraphY(values[count - 1], maxAbs, baselineY, maxH);
-
-        if (count > 1) {
-            dc.setColor(color, Graphics.COLOR_BLACK);
-            dc.setPenWidth(3);
-            var prevX = left;
-            var prevY = dayGraphY(values[0], maxAbs, baselineY, maxH);
-            for (var i = 1; i < count; i += 1) {
-                var x = left + ((i.toFloat() / (count - 1)) * (nowX - left));
-                var y = dayGraphY(values[i], maxAbs, baselineY, maxH);
-                dc.drawLine(prevX, prevY, x, y);
-                prevX = x;
-                prevY = y;
-            }
-            dc.setPenWidth(1);
-            lastX = prevX;
-            lastY = prevY;
+        var xs = new [count];
+        var battYs = new [count];
+        var totalYs = new [count];
+        for (var i = 0; i < count; i += 1) {
+            xs[i] = (count > 1) ? (left + ((i.toFloat() / (count - 1)) * (nowX - left))) : nowX;
+            var battVal = battValues[i];
+            var totalVal = totalValues[i];
+            // Guard against stale/inconsistent data (battery portion
+            // shouldn't ever exceed total production for the same sample).
+            if (battVal.toFloat().abs() > totalVal.toFloat().abs()) { battVal = totalVal; }
+            battYs[i] = dayGraphY(battVal, maxAbs, baselineY, maxH);
+            totalYs[i] = dayGraphY(totalVal, maxAbs, baselineY, maxH);
         }
 
-        // Pulsing "now" marker: radius oscillates 3-9px via _pulsePhase,
-        // ticked by a dedicated timer (see onPulseTick) independent of the
-        // data-refresh cycle.
+        if (count > 1) {
+            for (var i = 1; i < count; i += 1) {
+                dc.setColor(PV_BATTERY_BAND, Graphics.COLOR_BLACK);
+                dc.fillPolygon([
+                    [xs[i - 1], baselineY], [xs[i], baselineY],
+                    [xs[i], battYs[i]], [xs[i - 1], battYs[i - 1]],
+                ]);
+                dc.setColor(PV_HOME_BAND, Graphics.COLOR_BLACK);
+                dc.fillPolygon([
+                    [xs[i - 1], battYs[i - 1]], [xs[i], battYs[i]],
+                    [xs[i], totalYs[i]], [xs[i - 1], totalYs[i - 1]],
+                ]);
+            }
+
+            dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
+            dc.setPenWidth(3);
+            for (var j = 1; j < count; j += 1) {
+                dc.drawLine(xs[j - 1], totalYs[j - 1], xs[j], totalYs[j]);
+            }
+            dc.setPenWidth(1);
+        }
+
+        // Pulsing "now" marker on the total-production line: radius
+        // oscillates 3-9px via _pulsePhase, ticked by a dedicated timer
+        // (see onPulseTick) independent of the data-refresh cycle.
+        var lastX = xs[count - 1];
+        var lastY = totalYs[count - 1];
         var pulseR = 6 + (3 * Math.sin(_pulsePhase));
-        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
         dc.fillCircle(lastX, lastY, pulseR);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.fillCircle(lastX, lastY, 3);
-        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
         dc.fillCircle(lastX, lastY, 2);
     }
 

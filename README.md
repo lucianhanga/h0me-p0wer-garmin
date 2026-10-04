@@ -16,8 +16,8 @@ A native Garmin Connect IQ watch app for the 454×454 AMOLED Fēnix 8 target, sh
 |---|
 | ![Connection](docs/screenshots/connection.png) |
 
-1. **Overview** — all four metrics at a glance, 2×2 grid
-2. **Solar** — current output, plus a line graph spanning the whole day (0h–24h on the x-axis) with a pulsing dot marking "now"
+1. **Overview** — the live view: all four metrics at a glance, 2×2 grid, no +/- signs - Grid and Battery instead show a pulsing drawn triangle for direction (export/discharge before the word, import/charge after - same pattern both cells share)
+2. **Solar** — current output, plus a stacked-area graph spanning the whole day (0h–24h on the x-axis) - PV→battery stacked under PV→home, total production traced on top, same composition as the web app's Graph tab - with a pulsing dot marking "now"
 3. **Home** — current consumption, bar chart, today's total
 4. **Battery** — charge %, a fill bar, charge/discharge rate, time-to-full, capacity
 5. **Grid** — import/export rate, bar chart, today's exported/imported totals
@@ -67,12 +67,13 @@ With `USE_DEMO_DATA = true` the app runs standalone with static demo values — 
   "batteryCapacity": 14.2,
   "batteryMinutesToFull": 195,
   "solarHistory": [0.4, 0.7, 1.1, 1.8, 2.6, 3.4, 4.0, 4.4],
+  "solarBatteryHistory": [0.0, 0.1, 0.3, 0.6, 0.9, 1.2, 1.4, 1.5],
   "homeHistory": [1.2, 1.6, 1.3, 1.1, 1.0, 1.2, 1.4, 1.7],
   "gridHistory": [-0.8, -1.1, -1.6, -2.1, -2.4, -2.8, -3.1, -3.0]
 }
 ```
 
-`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. The `*History` arrays feed the Solar page's day graph — they should span from local midnight to now for that graph to read correctly (a known gap: the current backend sends a trailing 8h window instead; see `h0me-p0wer`'s `WATCH.readme` for the fix in progress).
+`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. The `*History` arrays feed the Solar page's day graph — they should span from local midnight to now for that graph to read correctly (a known gap: the current backend sends a trailing 8h window instead; see `h0me-p0wer`'s `WATCH.readme` for the fix in progress). `solarBatteryHistory` is the portion of each `solarHistory` sample routed to the battery (same cadence/length) — the graph stacks it under the PV→home remainder (`solarHistory[i] - solarBatteryHistory[i]`) beneath the total production line, matching the web app's Graph tab. Not sent by the backend yet either (same readme, follow-up 2) — falls back to a static demo curve until then.
 
 ## Installing on the real watch
 
