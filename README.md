@@ -9,9 +9,8 @@ A native Garmin Connect IQ watch app prototype for the 454×454 AMOLED Fēnix 8 
 3. Home consumption
 4. Battery
 5. Grid import/export
-6. Summary ring
-7. List view
-8. Connection / retry
+6. List view
+7. Connection / retry
 
 Use **UP/DOWN** or swipe to change pages. Press **START/ENTER** to advance or retry from the connection page.
 

@@ -2,17 +2,26 @@ using Toybox.Graphics;
 using Toybox.WatchUi;
 
 class HomePowerView extends WatchUi.View {
-    const PAGE_COUNT = 8;
+    const PAGE_COUNT = 7;
 
     // Layout tuned specifically for the 454x454 round AMOLED display used by
-    // the Fenix 8 47 mm / 51 mm.  The important rule is that all large text
-    // stays inside the wide middle portion of the circle; only small footer
-    // elements are allowed near the lower edge.
+    // the Fenix 8 47 mm / 51 mm. All large text stays inside the wide middle
+    // portion of the circle; only small footer elements sit near the lower
+    // edge.
+    //
+    // Vertical spacing throughout this file is derived from this device's
+    // ACTUAL font pixel heights (measured via dc.getFontHeight(), not
+    // guessed): FONT_XTINY=37, FONT_TINY=47, FONT_SMALL=53, FONT_MEDIUM=61.
+    // drawText's y is the TOP of the text's bounding box, so two stacked
+    // lines need their gap to be at least the first line's full font
+    // height, not just enough room for the glyphs' visual ink - otherwise
+    // the second line's box starts before the first line's box ends and
+    // they render on top of each other.
     const SAFE_LEFT = 86;
     const SAFE_RIGHT = 368;
-    const HEADER_LINE_Y = 42;
-    const FOOTER_STATUS_Y = 344;
-    const FOOTER_DOTS_Y = 378;
+    const HEADER_LINE_Y = 55;
+    const FOOTER_STATUS_Y = 372;
+    const FOOTER_DOTS_Y = 428;
 
     var _page = 0;
     var _online = true;
@@ -54,7 +63,7 @@ class HomePowerView extends WatchUi.View {
     }
 
     function activate() {
-        if (_page == 7 || !_online) {
+        if (_page == 6 || !_online) {
             _service.refresh();
         } else {
             nextPage();
@@ -72,17 +81,36 @@ class HomePowerView extends WatchUi.View {
         else if (_page == 2) { drawHome(dc); }
         else if (_page == 3) { drawBattery(dc); }
         else if (_page == 4) { drawGrid(dc); }
-        else if (_page == 5) { drawSummaryRing(dc); }
-        else if (_page == 6) { drawList(dc); }
+        else if (_page == 5) { drawList(dc); }
         else { drawConnection(dc); }
 
         drawFooter(dc);
     }
 
+    // Brand wordmark "h0mep0wer" with orange zeros, matching the web app
+    // (web/src/App.jsx .brand / .brand-zero, #F7A44F). A single drawText
+    // call can't mix colors, so this measures and draws each segment in
+    // turn, left to right, to land the whole thing centered.
+    const BRAND_ORANGE = 0xF7A44F;
+    const BRAND_SEGMENTS = ["h", "0", "mep", "0", "wer"];
+
     function drawHeader(dc) {
         var w = dc.getWidth();
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(w / 2, 14, Graphics.FONT_XTINY, "HOME POWER", Graphics.TEXT_JUSTIFY_CENTER);
+        var font = Graphics.FONT_XTINY;
+
+        var totalW = 0;
+        for (var i = 0; i < BRAND_SEGMENTS.size(); i += 1) {
+            totalW += dc.getTextWidthInPixels(BRAND_SEGMENTS[i], font);
+        }
+
+        var x = (w / 2) - (totalW / 2);
+        for (var j = 0; j < BRAND_SEGMENTS.size(); j += 1) {
+            var seg = BRAND_SEGMENTS[j];
+            dc.setColor(seg.equals("0") ? BRAND_ORANGE : Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
+            dc.drawText(x, 14, font, seg, Graphics.TEXT_JUSTIFY_LEFT);
+            x += dc.getTextWidthInPixels(seg, font);
+        }
+
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
         dc.drawLine(108, HEADER_LINE_Y, w - 108, HEADER_LINE_Y);
     }
@@ -103,48 +131,100 @@ class HomePowerView extends WatchUi.View {
         }
     }
 
+    // Two stacked rows of two cells. Each cell is a dot + label line (XTINY)
+    // + one combined "value unit" line (SMALL) - kept to two lines total so
+    // it fits the ~120px row budget the round display leaves above/below
+    // the header and footer bands.
     function drawOverview(dc) {
         var w = dc.getWidth();
         var cx = w / 2;
-        var leftX = 143;
-        var rightX = w - 143;
+        var leftX = 140;
+        var rightX = w - 140;
+        var row1Y = 77;
+        var row2Y = 247;
 
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
-        dc.drawLine(cx, 70, cx, 292);
-        dc.drawLine(92, 181, w - 92, 181);
+        dc.drawLine(cx, 64, cx, 366);
+        dc.drawLine(92, 217, w - 92, 217);
 
-        overviewCell(dc, leftX, 66, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
-        overviewCell(dc, rightX, 66, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
+        overviewCellUnit(dc, leftX, row1Y, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
+        overviewCellUnit(dc, rightX, row1Y, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
 
         var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
-        overviewCell(dc, leftX, 184, "GRID", signedKwNumber(_model.gridKw), _model.gridKw < 0 ? "kW export" : "kW import", gridColor);
-        overviewCell(dc, rightX, 184, "BATTERY", _model.batteryPct.format("%d") + "%", signedKw(_model.batteryKw), Graphics.COLOR_GREEN);
+        overviewCellUnit(dc, leftX, row2Y, "GRID", signedKwNumber(_model.gridKw), "kW", gridColor);
+        overviewCell(dc, rightX, row2Y, "BATTERY", _model.batteryPct.format("%d") + "%", Graphics.COLOR_GREEN);
     }
 
-    function overviewCell(dc, x, y, label, value, subValue, color) {
+    function overviewCell(dc, x, y, label, value, color) {
         dc.setColor(color, Graphics.COLOR_BLACK);
         dc.fillCircle(x, y + 7, 5);
         dc.drawText(x, y + 18, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(x, y + 46, Graphics.FONT_MEDIUM, value, Graphics.TEXT_JUSTIFY_CENTER);
+        // 18 (label offset) + 37 (FONT_XTINY height) + 4px gap.
+        dc.drawText(x, y + 59, Graphics.FONT_SMALL, value, Graphics.TEXT_JUSTIFY_CENTER);
+    }
 
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(x, y + 82, Graphics.FONT_XTINY, subValue, Graphics.TEXT_JUSTIFY_CENTER);
+    // Same as overviewCell, but the unit renders smaller than the number
+    // (e.g. "4.20" at FONT_SMALL next to "kW" at FONT_XTINY) instead of one
+    // uniform size.
+    function overviewCellUnit(dc, x, y, label, number, unit, color) {
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillCircle(x, y + 7, 5);
+        dc.drawText(x, y + 18, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
+
+        drawSplitUnit(dc, x, y + 59, number, unit, Graphics.FONT_SMALL, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    // Draws "number unit" (e.g. "4.20 kW") with the unit in a smaller font
+    // and dimmer color than the number - XTINY (37px) is the smallest text
+    // font this device exposes, so "smaller" than that isn't achievable
+    // without a custom bitmap font; the dimmer gray is what stands in for
+    // further size reduction. Both pieces are measured and drawn as two
+    // left-justified segments so the pair as a whole still lands centered
+    // or right-aligned per `justify`, the same trick the header wordmark
+    // uses for its multi-color text.
+    function drawSplitUnit(dc, x, y, number, unit, numberFont, unitFont, numberColor, justify) {
+        var numberW = dc.getTextWidthInPixels(number, numberFont);
+        var hasUnit = !unit.equals("");
+        var unitText = hasUnit ? (" " + unit) : "";
+        var unitW = hasUnit ? dc.getTextWidthInPixels(unitText, unitFont) : 0;
+        var totalW = numberW + unitW;
+
+        var startX;
+        if (justify == Graphics.TEXT_JUSTIFY_RIGHT) {
+            startX = x - totalW;
+        } else if (justify == Graphics.TEXT_JUSTIFY_CENTER) {
+            startX = x - (totalW / 2);
+        } else {
+            startX = x;
+        }
+
+        dc.setColor(numberColor, Graphics.COLOR_BLACK);
+        dc.drawText(startX, y, numberFont, number, Graphics.TEXT_JUSTIFY_LEFT);
+
+        if (hasUnit) {
+            // Lines up the unit's bottom with the number's bottom (nudged
+            // 2px up from an exact bottom-match, which read as slightly low).
+            var dy = dc.getFontHeight(numberFont) - dc.getFontHeight(unitFont) - 2;
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
+            dc.drawText(startX + numberW, y + dy, unitFont, unitText, Graphics.TEXT_JUSTIFY_LEFT);
+        }
     }
 
     function drawSolar(dc) {
         title(dc, "SOLAR", Graphics.COLOR_YELLOW);
-        mainMetric(dc, kwNumber(_model.solarKw), "kW", "current production", Graphics.COLOR_YELLOW);
-        drawBars(dc, _model.solarHistory, 4.8, 226, 48, Graphics.COLOR_YELLOW, false);
-        bottomPair(dc, "TODAY", kwh(_model.solarTodayKwh), "PEAK", "4.6 kW");
+        mainMetric(dc, kwNumber(_model.solarKw), "kW");
+        drawBars(dc, _model.solarHistory, 4.8, 263, 40, Graphics.COLOR_YELLOW, false);
+        bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
     }
 
     function drawHome(dc) {
         title(dc, "HOME", Graphics.COLOR_BLUE);
-        mainMetric(dc, kwNumber(_model.homeKw), "kW", "current consumption", Graphics.COLOR_BLUE);
-        drawBars(dc, _model.homeHistory, 3.0, 226, 48, Graphics.COLOR_BLUE, false);
-        bottomPair(dc, "TODAY", kwh(_model.homeTodayKwh), "NOW", kw(_model.homeKw));
+        mainMetric(dc, kwNumber(_model.homeKw), "kW");
+        drawBars(dc, _model.homeHistory, 3.0, 263, 40, Graphics.COLOR_BLUE, false);
+        bottomPair(dc, "TODAY", kwhNumber(_model.homeTodayKwh), "kWh", "NOW", kwNumber(_model.homeKw), "kW");
     }
 
     function drawBattery(dc) {
@@ -153,93 +233,67 @@ class HomePowerView extends WatchUi.View {
 
         title(dc, "BATTERY", Graphics.COLOR_GREEN);
 
-        // Keep the arc entirely below the title and leave clear vertical room
-        // for the power value and the two bottom statistics.
-        var cy = 143;
-        var radius = 64;
-        dc.setPenWidth(9);
-        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
-        dc.drawArc(cx, cy, radius, Graphics.ARC_CLOCKWISE, 225, -45);
-        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_BLACK);
-        var endDeg = 225 - ((270 * _model.batteryPct) / 100);
-        dc.drawArc(cx, cy, radius, Graphics.ARC_COUNTER_CLOCKWISE, 225, endDeg);
-        dc.setPenWidth(1);
-
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 121, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 157, Graphics.FONT_XTINY, "state of charge", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, 120, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
 
+        // Horizontal fill bar instead of a circular gauge - the arc-angle
+        // direction semantics on this device didn't behave as documented
+        // (a "280 degree clockwise from top" sweep rendered as a small
+        // sliver instead), so this reuses the same plain rectangle-fill
+        // approach already proven by drawBars elsewhere in this file.
+        // 120 (percent offset) + 61 (FONT_MEDIUM height) + 6px gap.
+        var barY = 187;
+        var barH = 18;
+        var barW = SAFE_RIGHT - SAFE_LEFT;
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
+        dc.drawRoundedRectangle(SAFE_LEFT, barY, barW, barH, 6);
+        var fillW = (barW * _model.batteryPct) / 100;
         dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 202, Graphics.FONT_MEDIUM, signedKw(_model.batteryKw), Graphics.TEXT_JUSTIFY_CENTER);
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 235, Graphics.FONT_XTINY, _model.batteryKw >= 0 ? "charging" : "discharging", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.fillRoundedRectangle(SAFE_LEFT, barY, fillW, barH, 6);
 
-        bottomPairAt(dc, 266, "TO FULL", minutes(_model.batteryMinutesToFull), "CAPACITY", kwh(_model.batteryCapacityKwh));
+        // 187 + 18 (bar height) + 12px gap.
+        drawSplitUnit(dc, cx, 217, signedKwNumber(_model.batteryKw), "kW", Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
+            Graphics.COLOR_GREEN, Graphics.TEXT_JUSTIFY_CENTER);
+
+        // 217 + 61 (FONT_MEDIUM height) + 12px gap.
+        bottomPairAt(dc, 290, "TO FULL", minutes(_model.batteryMinutesToFull), "",
+            "CAPACITY", kwhNumber(_model.batteryCapacityKwh), "kWh");
     }
 
     function drawGrid(dc) {
         var color = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
         title(dc, "GRID", color);
-        mainMetric(dc, signedKwNumber(_model.gridKw), "kW", _model.gridKw < 0 ? "exporting" : "importing", color);
+        mainMetric(dc, signedKwNumber(_model.gridKw), "kW");
 
-        // Signed chart uses a shorter amplitude so positive import bars never
-        // collide with the summary row below it.
-        drawBars(dc, _model.gridHistory, 3.5, 218, 38, color, true);
-        bottomPair(dc, "EXPORTED", kwh(_model.exportedTodayKwh), "IMPORTED", kwh(_model.importedTodayKwh));
+        drawBars(dc, _model.gridHistory, 3.5, 263, 32, color, true);
+        bottomPair(dc, "EXPORTED", kwhNumber(_model.exportedTodayKwh), "kWh",
+            "IMPORTED", kwhNumber(_model.importedTodayKwh), "kWh");
     }
 
-    function drawSummaryRing(dc) {
-        var w = dc.getWidth();
-        var cx = w / 2;
-        var cy = 184;
-        var r = 105;
-        var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
-
-        dc.setPenWidth(8);
-        dc.setColor(Graphics.COLOR_YELLOW, Graphics.COLOR_BLACK);
-        dc.drawArc(cx, cy, r, Graphics.ARC_COUNTER_CLOCKWISE, 175, 103);
-        dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_BLACK);
-        dc.drawArc(cx, cy, r, Graphics.ARC_COUNTER_CLOCKWISE, 85, 13);
-        dc.setColor(gridColor, Graphics.COLOR_BLACK);
-        dc.drawArc(cx, cy, r, Graphics.ARC_COUNTER_CLOCKWISE, 355, 283);
-        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_BLACK);
-        dc.drawArc(cx, cy, r, Graphics.ARC_COUNTER_CLOCKWISE, 265, 193);
-        dc.setPenWidth(1);
-
-        summaryCell(dc, 165, 116, "SOLAR", kwNumber(_model.solarKw), Graphics.COLOR_YELLOW);
-        summaryCell(dc, 289, 116, "HOME", kwNumber(_model.homeKw), Graphics.COLOR_BLUE);
-        summaryCell(dc, 165, 205, "GRID", signedKwNumber(_model.gridKw), gridColor);
-        summaryCell(dc, 289, 205, "BAT", _model.batteryPct.format("%d") + "%", Graphics.COLOR_GREEN);
-    }
-
-    function summaryCell(dc, x, y, label, value, color) {
-        dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.drawText(x, y, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(x, y + 29, Graphics.FONT_SMALL, value, Graphics.TEXT_JUSTIFY_CENTER);
-    }
-
+    // Single-line rows (dot + label left, value right). Values are kept
+    // short deliberately: a long combined string (e.g. battery % plus its
+    // charge rate) is wide enough at this font to run into the label on
+    // its left - the full charge-rate detail lives on the Battery page.
     function drawList(dc) {
-        var w = dc.getWidth();
         var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
 
-        listRow(dc, 78, "SOLAR", kw(_model.solarKw), Graphics.COLOR_YELLOW);
-        listRow(dc, 137, "HOME", kw(_model.homeKw), Graphics.COLOR_BLUE);
-        listRow(dc, 196, "GRID", signedKw(_model.gridKw), gridColor);
-        listRow(dc, 255, "BATTERY", _model.batteryPct.format("%d") + "%  " + signedKw(_model.batteryKw), Graphics.COLOR_GREEN);
+        listRow(dc, 66, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
+        listRow(dc, 138, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
+        listRow(dc, 210, "GRID", signedKwNumber(_model.gridKw), "kW", gridColor);
+        listRow(dc, 282, "BATTERY", _model.batteryPct.format("%d") + "%", "", Graphics.COLOR_GREEN);
     }
 
-    function listRow(dc, y, label, value, color) {
+    function listRow(dc, y, label, number, unit, color) {
         var w = dc.getWidth();
         dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.fillCircle(99, y + 11, 5);
+        dc.fillCircle(99, y + 18, 5);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
         dc.drawText(117, y, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_LEFT);
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(w - 96, y + 22, Graphics.FONT_TINY, value, Graphics.TEXT_JUSTIFY_RIGHT);
+        drawSplitUnit(dc, w - 96, y, number, unit, Graphics.FONT_TINY, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_RIGHT);
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
-        dc.drawLine(92, y + 48, w - 92, y + 48);
+        // + 47 (FONT_TINY height, the taller of the two) + 5px gap.
+        dc.drawLine(92, y + 52, w - 92, y + 52);
     }
 
     function drawConnection(dc) {
@@ -249,43 +303,43 @@ class HomePowerView extends WatchUi.View {
 
         title(dc, "CONNECTION", color);
 
+        // Centered in the gap between the title (ends y=116) and ONLINE
+        // (starts y=193): circle spans 2*32+7=71px, so cy=116+((77-71)/2)+32=155.
         dc.setColor(color, Graphics.COLOR_BLACK);
         dc.setPenWidth(7);
-        dc.drawCircle(cx, 132, 32);
+        dc.drawCircle(cx, 155, 32);
         dc.setPenWidth(1);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 176, Graphics.FONT_MEDIUM, _online ? "ONLINE" : "OFFLINE", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, 193, Graphics.FONT_MEDIUM, _online ? "ONLINE" : "OFFLINE", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 214, Graphics.FONT_XTINY, _online ? "server reachable" : "using cached data", Graphics.TEXT_JUSTIFY_CENTER);
+        // 193 + 61 (FONT_MEDIUM height) + 4px gap.
+        dc.drawText(cx, 258, Graphics.FONT_XTINY, _online ? "server reachable" : "using cached data", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawRoundedRectangle(137, 252, 180, 44, 18);
-        dc.drawText(cx, 263, Graphics.FONT_XTINY, _loading ? "UPDATING..." : "REFRESH", Graphics.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 310, Graphics.FONT_XTINY, _loading ? "please wait" : "press START to refresh", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawRoundedRectangle(137, 303, 180, 40, 18);
+        dc.drawText(cx, 305, Graphics.FONT_XTINY, _loading ? "UPDATING..." : "REFRESH", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function title(dc, label, color) {
         var w = dc.getWidth();
         dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.drawText(w / 2, 50, Graphics.FONT_SMALL, label, Graphics.TEXT_JUSTIFY_CENTER);
+        // HEADER_LINE_Y (55) + 8px gap, so the title's own top clears the
+        // brand underline instead of starting inside its row.
+        dc.drawText(w / 2, 63, Graphics.FONT_SMALL, label, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
-    function mainMetric(dc, value, unit, sub, color) {
+    // Value and unit on one line (e.g. "4.21 kW", unit smaller/dimmer) -
+    // keeping them as two separate lines left no vertical room for the bar
+    // chart and bottom stat row that follow (see the file header comment on
+    // real font heights).
+    function mainMetric(dc, number, unit) {
         var w = dc.getWidth();
         var cx = w / 2;
-
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 88, Graphics.FONT_MEDIUM, value, Graphics.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 122, Graphics.FONT_XTINY, unit, Graphics.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 145, Graphics.FONT_XTINY, sub, Graphics.TEXT_JUSTIFY_CENTER);
+        // 63 (title offset) + 53 (FONT_SMALL height) + 9px gap.
+        drawSplitUnit(dc, cx, 125, number, unit, Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawBars(dc, values, maxAbs, baselineY, maxH, color, signed) {
@@ -319,11 +373,19 @@ class HomePowerView extends WatchUi.View {
         }
     }
 
-    function bottomPair(dc, leftLabel, leftValue, rightLabel, rightValue) {
-        bottomPairAt(dc, 268, leftLabel, leftValue, rightLabel, rightValue);
+    // Label and value stay on separate stacked lines (narrow text, centered
+    // independently per side - this is what keeps left/right columns from
+    // ever colliding, unlike combining them onto one wide line). The gap
+    // between the two lines is the full FONT_XTINY height, not a fraction
+    // of it (see the file header comment on real font heights). The value's
+    // unit renders dimmer than its number, same as everywhere else - at
+    // this font (already the device's smallest) they're necessarily the
+    // same size, so color is the only remaining way to set them apart.
+    function bottomPair(dc, leftLabel, leftNumber, leftUnit, rightLabel, rightNumber, rightUnit) {
+        bottomPairAt(dc, 275, leftLabel, leftNumber, leftUnit, rightLabel, rightNumber, rightUnit);
     }
 
-    function bottomPairAt(dc, y, leftLabel, leftValue, rightLabel, rightValue) {
+    function bottomPairAt(dc, y, leftLabel, leftNumber, leftUnit, rightLabel, rightNumber, rightUnit) {
         var w = dc.getWidth();
         var leftX = 145;
         var rightX = w - 145;
@@ -332,9 +394,11 @@ class HomePowerView extends WatchUi.View {
         dc.drawText(leftX, y, Graphics.FONT_XTINY, leftLabel, Graphics.TEXT_JUSTIFY_CENTER);
         dc.drawText(rightX, y, Graphics.FONT_XTINY, rightLabel, Graphics.TEXT_JUSTIFY_CENTER);
 
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(leftX, y + 29, Graphics.FONT_TINY, leftValue, Graphics.TEXT_JUSTIFY_CENTER);
-        dc.drawText(rightX, y + 29, Graphics.FONT_TINY, rightValue, Graphics.TEXT_JUSTIFY_CENTER);
+        // + 37 (FONT_XTINY height) + 4px gap.
+        drawSplitUnit(dc, leftX, y + 41, leftNumber, leftUnit, Graphics.FONT_XTINY, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
+        drawSplitUnit(dc, rightX, y + 41, rightNumber, rightUnit, Graphics.FONT_XTINY, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function kw(v) {
@@ -357,6 +421,10 @@ class HomePowerView extends WatchUi.View {
 
     function kwh(v) {
         return v.format("%.1f") + " kWh";
+    }
+
+    function kwhNumber(v) {
+        return v.format("%.1f");
     }
 
     function minutes(total) {
