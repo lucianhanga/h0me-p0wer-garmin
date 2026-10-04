@@ -1,5 +1,8 @@
 using Toybox.Graphics;
 using Toybox.WatchUi;
+using Toybox.Timer;
+using Toybox.System;
+using Toybox.Math;
 
 class HomePowerView extends WatchUi.View {
     const PAGE_COUNT = 7;
@@ -29,18 +32,38 @@ class HomePowerView extends WatchUi.View {
     var _model;
     var _service;
 
+    // Pulsing "now" dot on the Solar day graph - ticks independently of
+    // the data-refresh timer (which runs every REFRESH_MS, far too slow
+    // for a visible pulse) purely to animate, redrawing the whole screen
+    // each tick since Monkey C has no partial-redraw primitive.
+    var _pulseTimer;
+    var _pulsePhase = 0.0;
+    const PULSE_TICK_MS = 250;
+    const PULSE_STEP = 0.5; // radians per tick
+
     function initialize() {
         View.initialize();
         _model = new HomePowerModel();
         _service = new HomePowerService(self, _model);
+        _pulseTimer = new Timer.Timer();
     }
 
     function onShow() {
         _service.start();
+        _pulseTimer.start(method(:onPulseTick), PULSE_TICK_MS, true);
     }
 
     function onHide() {
         _service.stop();
+        _pulseTimer.stop();
+    }
+
+    function onPulseTick() {
+        _pulsePhase += PULSE_STEP;
+        if (_pulsePhase > 2 * Math.PI) {
+            _pulsePhase -= 2 * Math.PI;
+        }
+        WatchUi.requestUpdate();
     }
 
     function isOnline() {
@@ -228,7 +251,7 @@ class HomePowerView extends WatchUi.View {
     function drawSolar(dc) {
         title(dc, "SOLAR", SOLAR_COLOR);
         mainMetric(dc, kwNumber(_model.solarKw), "kW");
-        drawBars(dc, _model.solarHistory, 4.8, 263, 40, SOLAR_COLOR, false);
+        drawDayGraph(dc, _model.solarHistory, 4.8, 256, 60, SOLAR_COLOR);
         bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
     }
 
@@ -393,6 +416,69 @@ class HomePowerView extends WatchUi.View {
                 dc.fillRectangle(x, baselineY - h, barW, h);
             }
         }
+    }
+
+    // Line graph spanning the full day (0h-24h fixed on the x-axis, not
+    // just however many samples exist) rather than a bar chart (2026, user
+    // request - Solar specifically). `values` are assumed to be evenly
+    // spaced samples from midnight up to now, so they're plotted between
+    // the left edge (0h) and a "now" x position derived from the actual
+    // clock - not the right edge - leaving the remaining hours of the day
+    // visibly blank. A pulsing dot marks today's most recent sample at
+    // that "now" x position, since the line stops there rather than
+    // reaching the end of the chart like a completed day's data would.
+    function drawDayGraph(dc, values, maxAbs, baselineY, maxH, color) {
+        var left = SAFE_LEFT;
+        var right = SAFE_RIGHT;
+        var chartW = right - left;
+
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
+        dc.drawLine(left, baselineY, right, baselineY);
+
+        var clock = System.getClockTime();
+        var nowFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
+        var nowX = left + (nowFrac * chartW);
+
+        var count = values.size();
+        if (count <= 0) { return; }
+
+        var lastX = nowX;
+        var lastY = dayGraphY(values[count - 1], maxAbs, baselineY, maxH);
+
+        if (count > 1) {
+            dc.setColor(color, Graphics.COLOR_BLACK);
+            dc.setPenWidth(3);
+            var prevX = left;
+            var prevY = dayGraphY(values[0], maxAbs, baselineY, maxH);
+            for (var i = 1; i < count; i += 1) {
+                var x = left + ((i.toFloat() / (count - 1)) * (nowX - left));
+                var y = dayGraphY(values[i], maxAbs, baselineY, maxH);
+                dc.drawLine(prevX, prevY, x, y);
+                prevX = x;
+                prevY = y;
+            }
+            dc.setPenWidth(1);
+            lastX = prevX;
+            lastY = prevY;
+        }
+
+        // Pulsing "now" marker: radius oscillates 3-9px via _pulsePhase,
+        // ticked by a dedicated timer (see onPulseTick) independent of the
+        // data-refresh cycle.
+        var pulseR = 6 + (3 * Math.sin(_pulsePhase));
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillCircle(lastX, lastY, pulseR);
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.fillCircle(lastX, lastY, 3);
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillCircle(lastX, lastY, 2);
+    }
+
+    function dayGraphY(value, maxAbs, baselineY, maxH) {
+        var h = ((value.toFloat().abs() / maxAbs) * maxH).toNumber();
+        if (h < 0) { h = 0; }
+        if (h > maxH) { h = maxH; }
+        return baselineY - h;
     }
 
     // Label and value stay on separate stacked lines (narrow text, centered
