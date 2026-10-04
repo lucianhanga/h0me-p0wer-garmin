@@ -150,24 +150,25 @@ class HomePowerView extends WatchUi.View {
         overviewCellUnit(dc, leftX, row1Y, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
         overviewCellUnit(dc, rightX, row1Y, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
 
+        // GREEN marks a "storing/surplus" state, ORANGE a "drawing" state -
+        // same rule for both: grid export (surplus leaving the house) and
+        // battery charging (energy being stored) are green; grid import
+        // and battery discharge are orange. Mirrors the Grid cell's own
+        // sign-to-color rule instead of leaving Battery statically green
+        // regardless of direction.
         var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
         overviewCellUnit(dc, leftX, row2Y, "GRID", signedKwNumber(_model.gridKw), "kW", gridColor);
-        overviewCell(dc, rightX, row2Y, "BATTERY", _model.batteryPct.format("%d") + "%", Graphics.COLOR_GREEN);
+
+        // Charge/discharge rate, styled identically to Solar/Home/Grid
+        // (2026, user request: "how much you pull from battery too" -
+        // the Live tab equivalent on the phone app shows this rate, not
+        // just the charge %, which stays available on the Battery page).
+        var batteryColor = _model.batteryKw < 0 ? Graphics.COLOR_ORANGE : Graphics.COLOR_GREEN;
+        overviewCellUnit(dc, rightX, row2Y, "BATTERY", signedKwNumber(_model.batteryKw), "kW", batteryColor);
     }
 
-    function overviewCell(dc, x, y, label, value, color) {
-        dc.setColor(color, Graphics.COLOR_BLACK);
-        dc.fillCircle(x, y + 7, 5);
-        dc.drawText(x, y + 18, Graphics.FONT_XTINY, label, Graphics.TEXT_JUSTIFY_CENTER);
-
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        // 18 (label offset) + 37 (FONT_XTINY height) + 4px gap.
-        dc.drawText(x, y + 59, Graphics.FONT_SMALL, value, Graphics.TEXT_JUSTIFY_CENTER);
-    }
-
-    // Same as overviewCell, but the unit renders smaller than the number
-    // (e.g. "4.20" at FONT_SMALL next to "kW" at FONT_XTINY) instead of one
-    // uniform size.
+    // Dot + label line (XTINY), then number+unit on one line, unit smaller
+    // than the number (e.g. "4.20" at FONT_SMALL next to "kW" at FONT_XTINY).
     function overviewCellUnit(dc, x, y, label, number, unit, color) {
         dc.setColor(color, Graphics.COLOR_BLACK);
         dc.fillCircle(x, y + 7, 5);
