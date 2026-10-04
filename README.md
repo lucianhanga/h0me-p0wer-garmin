@@ -8,21 +8,16 @@ A native Garmin Connect IQ watch app for the 454×454 AMOLED Fēnix 8 target, sh
 |---|---|---|
 | ![Overview](docs/screenshots/overview.png) | ![Solar](docs/screenshots/solar.png) | ![Home](docs/screenshots/home.png) |
 
-| Battery | Grid | List |
+| Battery | Today | Connection |
 |---|---|---|
-| ![Battery](docs/screenshots/battery.png) | ![Grid](docs/screenshots/grid.png) | ![List](docs/screenshots/list.png) |
-
-| Connection |
-|---|
-| ![Connection](docs/screenshots/connection.png) |
+| ![Battery](docs/screenshots/battery.png) | ![Today](docs/screenshots/list.png) | ![Connection](docs/screenshots/connection.png) |
 
 1. **Overview** — the live view: all four metrics at a glance, 2×2 grid, no +/- signs - Grid and Battery instead show a pulsing drawn triangle for direction (export/discharge before the word, import/charge after - same pattern both cells share)
-2. **Solar** — current output, plus a stacked-area graph spanning the whole day (0h–24h on the x-axis) - PV→battery stacked under PV→home, total production traced on top, same composition as the web app's Graph tab - with a pulsing dot marking "now"
-3. **Home** — current consumption, bar chart, today's total
-4. **Battery** — charge %, a fill bar, charge/discharge rate, time-to-full, capacity
-5. **Grid** — import/export rate, bar chart, today's exported/imported totals
-6. **List** — all four metrics as compact rows
-7. **Connection** — online/offline status, manual retry
+2. **Solar** — a stacked-area graph spanning the whole day (0h–24h on the x-axis) - PV→battery stacked under PV→home, total production traced on top, same composition as the web app's Graph tab - with a pulsing dot marking "now", plus today's total and peak
+3. **Home** — 24 fixed hourly stacked bars (grid base, battery middle, solar remainder on top), matching the web app's Dashboard stacked-bar composition, plus today's total and the current rate
+4. **Battery** — charge %, a fill bar with LOW/HIGH SOC threshold markers, charge/discharge rate, "TO FULL"/"TO EMPTY" time estimate, capacity - the title carries the same direction triangle as Overview's Battery cell
+5. **Today** — a breakdown matching the web app's Dashboard "today" tile: total consumption, produced, then Grid/direct-PV/from-battery/to-battery/to-grid each with kWh (percentages, computed the same way the web app does, only on the three rows that sum to ~100% of consumption)
+6. **Connection** — online/offline status, manual retry
 
 Click/tap the watch face (or press **START/ENTER**) to advance a page; the last page retries the connection instead of advancing.
 
@@ -60,20 +55,28 @@ With `USE_DEMO_DATA = true` the app runs standalone with static demo values — 
   "grid": -2.34,
   "battery": 78,
   "batteryPower": 1.20,
+  "batteryCapacity": 14.2,
+  "batteryMinutesToFull": 195,
+  "batteryMinutesToEmpty": 340,
+  "batteryFloorPct": 10,
+  "batteryMaxPct": 95,
   "solarToday": 18.4,
+  "solarDirectToday": 6.9,
   "homeToday": 22.6,
   "exportedToday": 18.1,
   "importedToday": 6.4,
-  "batteryCapacity": 14.2,
-  "batteryMinutesToFull": 195,
+  "batteryDischargedToday": 3.8,
+  "batteryChargedToday": 9.2,
   "solarHistory": [0.4, 0.7, 1.1, 1.8, 2.6, 3.4, 4.0, 4.4],
   "solarBatteryHistory": [0.0, 0.1, 0.3, 0.6, 0.9, 1.2, 1.4, 1.5],
   "homeHistory": [1.2, 1.6, 1.3, 1.1, 1.0, 1.2, 1.4, 1.7],
+  "homeFromGridHistory": [1.2, 1.6, 1.3, 1.1, 1.0, 1.2, 1.4, 1.3],
+  "homeFromBatteryHistory": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2],
   "gridHistory": [-0.8, -1.1, -1.6, -2.1, -2.4, -2.8, -3.1, -3.0]
 }
 ```
 
-`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. The `*History` arrays feed the Solar page's day graph — they should span from local midnight to now for that graph to read correctly (a known gap: the current backend sends a trailing 8h window instead; see `h0me-p0wer`'s `WATCH.readme` for the fix in progress). `solarBatteryHistory` is the portion of each `solarHistory` sample routed to the battery (same cadence/length) — the graph stacks it under the PV→home remainder (`solarHistory[i] - solarBatteryHistory[i]`) beneath the total production line, matching the web app's Graph tab. Not sent by the backend yet either (same readme, follow-up 2) — falls back to a static demo curve until then.
+`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. `solarToday` is total production; `solarDirectToday` is the PV-direct-to-home portion of it (a smaller number). `batteryDischargedToday`/`batteryChargedToday` are cells-only, excluding PV pass-through. The `*History` arrays feed the Solar day graph and Home stacked bars — they span from local midnight to now, one point per hour. `solarBatteryHistory` is the portion of each `solarHistory` sample routed to the battery (same cadence/length) — the Solar graph stacks it under the PV→home remainder beneath the total production line. `homeFromGridHistory`/`homeFromBatteryHistory` split `homeHistory` the same way for the Home page's stacked bars (grid base, battery middle, solar remainder — `homeHistory[i] - homeFromGridHistory[i] - homeFromBatteryHistory[i]` — on top). Any array shorter than its sibling (e.g. still demo-fallback) is nearest-neighbor resampled onto the real array's index range rather than truncating it.
 
 ## Installing on the real watch
 
