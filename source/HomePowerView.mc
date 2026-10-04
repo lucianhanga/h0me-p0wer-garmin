@@ -94,6 +94,20 @@ class HomePowerView extends WatchUi.View {
     const BRAND_ORANGE = 0xF7A44F;
     const BRAND_SEGMENTS = ["h", "0", "mep", "0", "wer"];
 
+    // Same 4-category color convention as the web app (web/src/styles.css
+    // .wx-c-grid/.wx-c-pv/.wx-c-batt, ~line 1795-1797): Grid is always this
+    // one orange (not direction-dependent - import and export share it,
+    // direction is conveyed by sign/position, not color), Solar/PV is this
+    // green, Battery is this violet for discharge specifically, with
+    // charging using a separate, deliberately muted grey instead of its
+    // own violet shade. Home has no brand color in the web app either -
+    // it's the neutral aggregate, rendered in this same off-white used for
+    // the web app's house chart series (web/src/live/LiveTab.jsx:221).
+    const SOLAR_COLOR = 0x5FCE80;
+    const HOME_COLOR = 0xE8ECEF;
+    const BATTERY_VIOLET = 0xC084FC;
+    const BATTERY_CHARGE_GREY = 0x8B98A5;
+
     function drawHeader(dc) {
         var w = dc.getWidth();
         var font = Graphics.FONT_XTINY;
@@ -147,23 +161,20 @@ class HomePowerView extends WatchUi.View {
         dc.drawLine(cx, 64, cx, 366);
         dc.drawLine(92, 217, w - 92, 217);
 
-        overviewCellUnit(dc, leftX, row1Y, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
-        overviewCellUnit(dc, rightX, row1Y, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
+        overviewCellUnit(dc, leftX, row1Y, "SOLAR", kwNumber(_model.solarKw), "kW", SOLAR_COLOR);
+        overviewCellUnit(dc, rightX, row1Y, "HOME", kwNumber(_model.homeKw), "kW", HOME_COLOR);
 
-        // GREEN marks a "storing/surplus" state, ORANGE a "drawing" state -
-        // same rule for both: grid export (surplus leaving the house) and
-        // battery charging (energy being stored) are green; grid import
-        // and battery discharge are orange. Mirrors the Grid cell's own
-        // sign-to-color rule instead of leaving Battery statically green
-        // regardless of direction.
-        var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
-        overviewCellUnit(dc, leftX, row2Y, "GRID", signedKwNumber(_model.gridKw), "kW", gridColor);
+        // Grid is always this one orange in the web app - not direction-
+        // dependent. Import vs export is conveyed by the sign, not color.
+        overviewCellUnit(dc, leftX, row2Y, "GRID", signedKwNumber(_model.gridKw), "kW", BRAND_ORANGE);
 
         // Charge/discharge rate, styled identically to Solar/Home/Grid
         // (2026, user request: "how much you pull from battery too" -
         // the Live tab equivalent on the phone app shows this rate, not
         // just the charge %, which stays available on the Battery page).
-        var batteryColor = _model.batteryKw < 0 ? Graphics.COLOR_ORANGE : Graphics.COLOR_GREEN;
+        // Violet when discharging, grey when charging - the web app's own
+        // battery color convention (see the constants above).
+        var batteryColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
         overviewCellUnit(dc, rightX, row2Y, "BATTERY", signedKwNumber(_model.batteryKw), "kW", batteryColor);
     }
 
@@ -215,16 +226,16 @@ class HomePowerView extends WatchUi.View {
     }
 
     function drawSolar(dc) {
-        title(dc, "SOLAR", Graphics.COLOR_YELLOW);
+        title(dc, "SOLAR", SOLAR_COLOR);
         mainMetric(dc, kwNumber(_model.solarKw), "kW");
-        drawBars(dc, _model.solarHistory, 4.8, 263, 40, Graphics.COLOR_YELLOW, false);
+        drawBars(dc, _model.solarHistory, 4.8, 263, 40, SOLAR_COLOR, false);
         bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
     }
 
     function drawHome(dc) {
-        title(dc, "HOME", Graphics.COLOR_BLUE);
+        title(dc, "HOME", HOME_COLOR);
         mainMetric(dc, kwNumber(_model.homeKw), "kW");
-        drawBars(dc, _model.homeHistory, 3.0, 263, 40, Graphics.COLOR_BLUE, false);
+        drawBars(dc, _model.homeHistory, 3.0, 263, 40, HOME_COLOR, false);
         bottomPair(dc, "TODAY", kwhNumber(_model.homeTodayKwh), "kWh", "NOW", kwNumber(_model.homeKw), "kW");
     }
 
@@ -232,7 +243,7 @@ class HomePowerView extends WatchUi.View {
         var w = dc.getWidth();
         var cx = w / 2;
 
-        title(dc, "BATTERY", Graphics.COLOR_GREEN);
+        title(dc, "BATTERY", BATTERY_VIOLET);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.drawText(cx, 120, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
@@ -241,7 +252,9 @@ class HomePowerView extends WatchUi.View {
         // direction semantics on this device didn't behave as documented
         // (a "280 degree clockwise from top" sweep rendered as a small
         // sliver instead), so this reuses the same plain rectangle-fill
-        // approach already proven by drawBars elsewhere in this file.
+        // approach already proven by drawBars elsewhere in this file. This
+        // shows state of charge, not direction, so it stays the battery's
+        // identity violet regardless of charge/discharge.
         // 120 (percent offset) + 61 (FONT_MEDIUM height) + 6px gap.
         var barY = 187;
         var barH = 18;
@@ -249,12 +262,15 @@ class HomePowerView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
         dc.drawRoundedRectangle(SAFE_LEFT, barY, barW, barH, 6);
         var fillW = (barW * _model.batteryPct) / 100;
-        dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_BLACK);
+        dc.setColor(BATTERY_VIOLET, Graphics.COLOR_BLACK);
         dc.fillRoundedRectangle(SAFE_LEFT, barY, fillW, barH, 6);
 
+        // Rate DOES encode direction, so it switches color same as the
+        // Overview cell: violet discharging, grey charging.
+        var rateColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
         // 187 + 18 (bar height) + 12px gap.
         drawSplitUnit(dc, cx, 217, signedKwNumber(_model.batteryKw), "kW", Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
-            Graphics.COLOR_GREEN, Graphics.TEXT_JUSTIFY_CENTER);
+            rateColor, Graphics.TEXT_JUSTIFY_CENTER);
 
         // 217 + 61 (FONT_MEDIUM height) + 12px gap.
         bottomPairAt(dc, 290, "TO FULL", minutes(_model.batteryMinutesToFull), "",
@@ -262,11 +278,13 @@ class HomePowerView extends WatchUi.View {
     }
 
     function drawGrid(dc) {
-        var color = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
-        title(dc, "GRID", color);
+        // Grid is always this one orange in the web app - not direction-
+        // dependent. The bar chart still shows import vs export via bar
+        // position (above/below the baseline), just no longer via color.
+        title(dc, "GRID", BRAND_ORANGE);
         mainMetric(dc, signedKwNumber(_model.gridKw), "kW");
 
-        drawBars(dc, _model.gridHistory, 3.5, 263, 32, color, true);
+        drawBars(dc, _model.gridHistory, 3.5, 263, 32, BRAND_ORANGE, true);
         bottomPair(dc, "EXPORTED", kwhNumber(_model.exportedTodayKwh), "kWh",
             "IMPORTED", kwhNumber(_model.importedTodayKwh), "kWh");
     }
@@ -276,12 +294,12 @@ class HomePowerView extends WatchUi.View {
     // charge rate) is wide enough at this font to run into the label on
     // its left - the full charge-rate detail lives on the Battery page.
     function drawList(dc) {
-        var gridColor = _model.gridKw < 0 ? Graphics.COLOR_GREEN : Graphics.COLOR_ORANGE;
+        var batteryColor = _model.batteryKw < 0 ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
 
-        listRow(dc, 66, "SOLAR", kwNumber(_model.solarKw), "kW", Graphics.COLOR_YELLOW);
-        listRow(dc, 138, "HOME", kwNumber(_model.homeKw), "kW", Graphics.COLOR_BLUE);
-        listRow(dc, 210, "GRID", signedKwNumber(_model.gridKw), "kW", gridColor);
-        listRow(dc, 282, "BATTERY", _model.batteryPct.format("%d") + "%", "", Graphics.COLOR_GREEN);
+        listRow(dc, 66, "SOLAR", kwNumber(_model.solarKw), "kW", SOLAR_COLOR);
+        listRow(dc, 138, "HOME", kwNumber(_model.homeKw), "kW", HOME_COLOR);
+        listRow(dc, 210, "GRID", signedKwNumber(_model.gridKw), "kW", BRAND_ORANGE);
+        listRow(dc, 282, "BATTERY", _model.batteryPct.format("%d") + "%", "", batteryColor);
     }
 
     function listRow(dc, y, label, number, unit, color) {
@@ -364,11 +382,14 @@ class HomePowerView extends WatchUi.View {
             if (h > maxH) { h = maxH; }
 
             var x = left + i * (barW + gap);
+            dc.setColor(color, Graphics.COLOR_BLACK);
+            // Direction (e.g. grid import vs export) is shown by bar
+            // position - above or below the baseline - not by color; both
+            // sides share the series' one color, matching the web app's
+            // single-color-per-category convention.
             if (signed && v > 0) {
-                dc.setColor(Graphics.COLOR_ORANGE, Graphics.COLOR_BLACK);
                 dc.fillRectangle(x, baselineY, barW, h);
             } else {
-                dc.setColor(color, Graphics.COLOR_BLACK);
                 dc.fillRectangle(x, baselineY - h, barW, h);
             }
         }
