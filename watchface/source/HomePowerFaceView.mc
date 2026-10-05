@@ -139,19 +139,19 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // enough to overlap.
         drawTime(dc, cx, textCy);
         drawDate(dc, cx, textCy);
-        drawMomentaryLine(dc, cx, liveCy);
+        var liveRowHalfWidth = drawMomentaryLine(dc, cx, liveCy);
         // A small traveling dot with a fading tail, bouncing left-right
         // right under the momentary row, to mark it as the live one
         // (2026, user request: "emphasise that the row above the time
         // is the live value... a pixel which travels from left to
-        // right and right to left leaving a tail"). Driven by
-        // System.getTimer() (ms since boot), not a dedicated Timer -
-        // its position is a pure function of elapsed real time, so
-        // whatever cadence the system already calls onUpdate at while
-        // active is all the animation needs; no new continuously
-        // running Timer (2026, user request earlier: "stop the
-        // pulsating for all" - this doesn't bring that back).
-        drawLiveIndicator(dc, cx, liveCy - 44, 100);
+        // right and right to left leaving a tail"). Travels exactly the
+        // row's own rendered width now, not a guessed fixed span (2026,
+        // user request: "make the pixel travel from beginning to the
+        // end of the live data row"). Driven by System.getTimer() (ms
+        // since boot), not a dedicated Timer for its position - the
+        // ANIM_TICK_MS timer added separately just repaints more often
+        // so that continuous motion is actually visible.
+        drawLiveIndicator(dc, cx, liveCy - 44, liveRowHalfWidth);
         drawValuesLine(dc, cx, textCy);
         drawSteps(dc, cx, textCy + 86);
         drawUpdatedText(dc, cx, h);
@@ -493,6 +493,12 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         x += iconSize + iconGap;
         dc.setColor(battColor, Graphics.COLOR_BLACK);
         dc.drawText(x, y, font, battText, Graphics.TEXT_JUSTIFY_LEFT);
+
+        // Half the row's actual rendered width, so the live indicator
+        // below can travel edge-to-edge of the real row instead of a
+        // guessed fixed span (2026, user request: "make the pixel
+        // travel from beginning to the end of the live data row").
+        return totalW / 2;
     }
 
     // The four today's-totals numbers, color-coded, each preceded by a
@@ -690,10 +696,21 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var headX = (cx - halfWidth) + (pos * 2 * halfWidth);
         var half = dotSize / 2.0;
 
+        // Orange, fading to black toward the tail's far end (2026, user
+        // request: "make it orange") - same brand orange the Grid
+        // glyph/segments use elsewhere on this face, not literally the
+        // red/white glow in the reference images (no per-pixel alpha
+        // to blend a true glow with).
+        var baseR = (BRAND_ORANGE >> 16) & 0xFF;
+        var baseG = (BRAND_ORANGE >> 8) & 0xFF;
+        var baseB = BRAND_ORANGE & 0xFF;
         for (var i = tailLen - 1; i >= 0; i -= 1) {
             var tailX = movingRight ? headX - (i * step) : headX + (i * step);
-            var gray = 255 - ((255 * i) / tailLen).toNumber();
-            var color = (gray << 16) | (gray << 8) | gray;
+            var t2 = 1.0 - (i.toFloat() / tailLen);
+            var r = (baseR * t2).toNumber();
+            var g = (baseG * t2).toNumber();
+            var b = (baseB * t2).toNumber();
+            var color = (r << 16) | (g << 8) | b;
             dc.setColor(color, Graphics.COLOR_BLACK);
             dc.fillRectangle((tailX - half).toNumber(), (y - half).toNumber(), dotSize, dotSize);
         }
