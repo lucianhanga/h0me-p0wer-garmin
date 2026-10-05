@@ -286,7 +286,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         }
 
         var x = cx - (totalW / 2);
-        var y = cy + 41;
+        var y = cy + 44;
         for (var j = 0; j < values.size(); j += 1) {
             dc.setColor(values[j][1], Graphics.COLOR_BLACK);
             dc.drawText(x, y, font, texts[j], Graphics.TEXT_JUSTIFY_LEFT);
