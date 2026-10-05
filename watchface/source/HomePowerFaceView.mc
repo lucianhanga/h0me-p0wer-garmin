@@ -60,6 +60,16 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // idea as the companion app's "updated HH:MM" status line.
     var _updatedText = "--:--";
 
+    // Temporary debugging fields (2026, user report: real watch stuck
+    // showing "--:--" forever, works fine in the simulator) -
+    // _lastInvokedAt proves HomePowerFaceDelegate.onTemporalEvent ran at
+    // all; _lastAttemptText/_lastResponseCode show the most recent
+    // fetch's outcome even when it failed, not just successes. Remove
+    // once the real cause is found and fixed.
+    var _lastInvokedAt = "never";
+    var _lastAttemptText = "never";
+    var _lastResponseCode = 0;
+
     // Redraws just often enough for the live indicator's travel to read
     // as smooth motion instead of visible jumps (2026, user request:
     // "make the running pixel a bit smoother") - its position is
@@ -162,6 +172,24 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // than only on data arrival, so a freshly-installed face with no
     // cached data yet still renders (zeros) instead of erroring.
     function loadCachedData() {
+        // Diagnostic fields load BEFORE the early-return below, not
+        // after - they're meant to be visible even when a fetch has
+        // never once succeeded (lastData still null), which is exactly
+        // the state they're for debugging (2026, user report: real
+        // watch stuck on "--:--" forever, no visibility into why).
+        var invokedAt = Application.Storage.getValue("lastInvokedAt");
+        if (invokedAt != null && invokedAt instanceof Lang.String) {
+            _lastInvokedAt = invokedAt;
+        }
+        var attemptAt = Application.Storage.getValue("lastAttemptText");
+        if (attemptAt != null && attemptAt instanceof Lang.String) {
+            _lastAttemptText = attemptAt;
+        }
+        var code = Application.Storage.getValue("lastResponseCode");
+        if (code != null && code instanceof Lang.Number) {
+            _lastResponseCode = code;
+        }
+
         var data = Application.Storage.getValue("lastData");
         if (data == null || !(data instanceof Lang.Dictionary)) { return; }
         _homeToday = getFloat(data, "homeToday", _homeToday);
@@ -742,5 +770,10 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     function drawUpdatedText(dc, cx, h) {
         drawScaledText(dc, cx, h - 70, "updated " + _updatedText, Graphics.FONT_XTINY,
             Graphics.COLOR_LT_GRAY, 0.42, Graphics.TEXT_JUSTIFY_CENTER);
+        // Temporary debug line - see the fields' own comment. Remove
+        // once the real cause of the real-watch "--:--" report is found.
+        var debugText = "inv " + _lastInvokedAt + " try " + _lastAttemptText + " (" + _lastResponseCode.format("%d") + ")";
+        drawScaledText(dc, cx, h - 58, debugText, Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, 0.36, Graphics.TEXT_JUSTIFY_CENTER);
     }
 }

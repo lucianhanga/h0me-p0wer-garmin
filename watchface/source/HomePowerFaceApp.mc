@@ -54,18 +54,28 @@ class HomePowerFaceApp extends Application.AppBase {
 
     // Called in the FOREGROUND context once the background fetch
     // completes (see HomePowerFaceDelegate.onReceive's Background.exit).
-    // Cache the raw dictionary for the view to read in onUpdate, wake the
-    // face so it redraws immediately instead of waiting for the next
-    // natural minute tick, and schedule the next refresh.
-    function onBackgroundData(data) {
-        if (data != null) {
-            Application.Storage.setValue("lastData", data);
-            // Stamped here, not read live in the view - this marks when
-            // data actually arrived, not "now" (2026, user request: "put
-            // a very small timestamp").
-            var clock = System.getClockTime();
-            Application.Storage.setValue("lastUpdateText",
-                clock.hour.format("%02d") + ":" + clock.min.format("%02d"));
+    // `result` is now {"responseCode" => N, "data" => {...}?} rather
+    // than the bare dictionary, so a failed/non-200 attempt is still
+    // visible (2026, debugging: real watch stuck on "--:--" forever,
+    // need to see WHY an attempt is failing, not just whether it
+    // succeeded) - the view surfaces responseCode next to "updated" so
+    // a failure reason is visible without a USB-tethered debug session.
+    function onBackgroundData(result) {
+        var clock = System.getClockTime();
+        var nowText = clock.hour.format("%02d") + ":" + clock.min.format("%02d");
+
+        if (result != null && result instanceof Lang.Dictionary) {
+            if (result.hasKey("responseCode")) {
+                Application.Storage.setValue("lastResponseCode", result["responseCode"]);
+                Application.Storage.setValue("lastAttemptText", nowText);
+            }
+            if (result.hasKey("data")) {
+                Application.Storage.setValue("lastData", result["data"]);
+                // Stamped here, not read live in the view - this marks
+                // when data actually arrived, not "now" (2026, user
+                // request: "put a very small timestamp").
+                Application.Storage.setValue("lastUpdateText", nowText);
+            }
         }
         scheduleNextRefresh();
         WatchUi.requestUpdate();

@@ -2,6 +2,7 @@ using Toybox.Background;
 using Toybox.System;
 using Toybox.Communications;
 using Toybox.Lang;
+using Toybox.Application;
 
 // Runs outside the normal app lifecycle, woken by the temporal event
 // HomePowerFaceApp schedules (see its scheduleNextRefresh) - this is the
@@ -15,7 +16,21 @@ class HomePowerFaceDelegate extends System.ServiceDelegate {
         System.ServiceDelegate.initialize();
     }
 
+    // Application.Storage is available directly in the background
+    // context (unlike most of Toybox), so this writes a marker
+    // synchronously BEFORE the async network call, not via
+    // Background.exit (which would end the process right here instead
+    // of continuing to actually fetch). If the request then hangs or
+    // never calls back for any reason, this marker still proves the OS
+    // invoked the delegate at all - distinguishing "scheduling never
+    // fires on this device" from "it fires but the request fails"
+    // (2026, debugging a user report: real watch never shows anything
+    // but "--:--", despite the exact same delegate code working every
+    // time when manually triggered in the simulator).
     function onTemporalEvent() {
+        Application.Storage.setValue("lastInvokedAt", System.getClockTime().hour.format("%02d") + ":" +
+            System.getClockTime().min.format("%02d"));
+
         var headers = { "Accept" => "application/json" };
         if (!Config.API_TOKEN.equals("")) {
             headers.put("Authorization", "Bearer " + Config.API_TOKEN);
@@ -39,10 +54,10 @@ class HomePowerFaceDelegate extends System.ServiceDelegate {
         responseCode as Lang.Number,
         data as Lang.Dictionary or Lang.String or Null
     ) as Void {
+        var result = { "responseCode" => responseCode };
         if (responseCode == 200 && data instanceof Lang.Dictionary) {
-            Background.exit(data);
-        } else {
-            Background.exit(null);
+            result.put("data", data);
         }
+        Background.exit(result);
     }
 }
