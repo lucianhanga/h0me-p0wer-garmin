@@ -5,6 +5,9 @@ bin/
 *.der
 *.jwt
 
+# Backend API token - never commit this (copy source/Secrets.example.mc)
+source/Secrets.mc
+
 # OS files
 .DS_Store
 
