@@ -51,13 +51,18 @@ class HomePowerService {
 
         WatchUi.requestUpdate();
 
+        var headers = {
+            "Accept" => "application/json"
+        };
+        if (!Config.API_TOKEN.equals("")) {
+            headers.put("Authorization", "Bearer " + Config.API_TOKEN);
+        }
+
         var options = {
             :method =>
                 Communications.HTTP_REQUEST_METHOD_GET,
 
-            :headers => {
-                "Accept" => "application/json"
-            },
+            :headers => headers,
 
             :responseType =>
                 Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
