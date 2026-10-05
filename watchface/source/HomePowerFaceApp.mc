@@ -11,19 +11,29 @@ class HomePowerFaceApp extends Application.AppBase {
         AppBase.initialize();
     }
 
+    // Garmin enforces a hard 5-minute FLOOR on registerForTemporalEvent -
+    // confirmed via Garmin's own developer forums (nothing shorter is
+    // honored on real hardware, even though the simulator doesn't
+    // enforce it the same way). The previous cold-start fix here asked
+    // for 10 SECONDS, under that floor - almost certainly silently
+    // rejected, which left onBackgroundData never getting called even
+    // once on a real watch (2026, user report: "the values from the
+    // watch do not update... there are some fixed values which do not
+    // change" - confirmed root cause). MIN_REFRESH_SECONDS is that
+    // floor, used for the cold-start registration below instead of a
+    // too-fast guess.
+    const MIN_REFRESH_SECONDS = 300;
+
     function onStart(state) {
         // Cold start (freshly installed, or relaunched before any
-        // background fetch has ever landed) - get real data in within
-        // seconds instead of leaving the view showing its zero defaults
-        // for up to REFRESH_MINUTES (2026, user report: "did not show
-        // any values... all were on zero" - confirmed cause: this used
-        // to unconditionally call scheduleNextRefresh(), scheduling
-        // even the very FIRST fetch a full REFRESH_MINUTES out). Once
-        // data has landed at least once, onBackgroundData's own
-        // scheduleNextRefresh() call takes over for every refresh after
-        // this one.
+        // background fetch has ever landed) - get real data in as soon
+        // as the platform allows (see MIN_REFRESH_SECONDS above)
+        // instead of leaving the view showing its zero defaults for up
+        // to the full REFRESH_MINUTES. Once data has landed at least
+        // once, onBackgroundData's own scheduleNextRefresh() call takes
+        // over for every refresh after this one.
         if (Application.Storage.getValue("lastData") == null) {
-            Background.registerForTemporalEvent(Time.now().add(new Time.Duration(10)));
+            Background.registerForTemporalEvent(Time.now().add(new Time.Duration(MIN_REFRESH_SECONDS)));
         } else {
             scheduleNextRefresh();
         }
