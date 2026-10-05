@@ -93,7 +93,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // The time-through-steps block shifted down separately (2026,
         // user requests: +20 earlier, this block's own +5 on top of
         // that), independent of liveCy above.
-        var textCy = cy + 25;
+        var textCy = cy + 30;
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
         // whichever is painted later wins wherever the two sit close
