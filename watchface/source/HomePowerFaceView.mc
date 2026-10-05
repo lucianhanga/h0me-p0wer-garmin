@@ -206,7 +206,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
-        var y = cy - 88;
+        var y = cy - 85;
         var x = cx - (totalW / 2);
 
         dc.setColor(homeColor, Graphics.COLOR_BLACK);
