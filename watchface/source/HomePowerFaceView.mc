@@ -100,6 +100,18 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         drawTime(dc, cx, textCy);
         drawDate(dc, cx, textCy);
         drawMomentaryLine(dc, cx, textCy);
+        // A small traveling dot with a fading tail, bouncing left-right
+        // right under the momentary row, to mark it as the live one
+        // (2026, user request: "emphasise that the row above the time
+        // is the live value... a pixel which travels from left to
+        // right and right to left leaving a tail"). Driven by
+        // System.getTimer() (ms since boot), not a dedicated Timer -
+        // its position is a pure function of elapsed real time, so
+        // whatever cadence the system already calls onUpdate at while
+        // active is all the animation needs; no new continuously
+        // running Timer (2026, user request earlier: "stop the
+        // pulsating for all" - this doesn't bring that back).
+        drawLiveIndicator(dc, cx, textCy - 44, 100);
         drawValuesLine(dc, cx, textCy);
         drawSteps(dc, cx, textCy + 86);
         drawUpdatedText(dc, cx, h);
@@ -611,6 +623,40 @@ class HomePowerFaceView extends WatchUi.WatchFace {
             destX = x;
         }
         dc.drawScaledBitmap(destX, y, destW, destH, bmp);
+    }
+
+    // Bounces a small dot back and forth across a `2*halfWidth`-wide
+    // span centered on `cx`, with a short fading tail behind it in
+    // whichever direction it's currently traveling - discrete stepped
+    // squares, not a true alpha blend (matches the blocky look of the
+    // reference images, and dc has no per-pixel alpha for fills anyway).
+    function drawLiveIndicator(dc, cx, y, halfWidth) {
+        var travelMs = 4000;
+        var tailLen = 6;
+        var step = 6;
+        var dotSize = 4;
+
+        var t = System.getTimer() % travelMs;
+        var frac = t.toFloat() / travelMs;
+        var pos;
+        var movingRight;
+        if (frac < 0.5) {
+            pos = frac * 2;
+            movingRight = true;
+        } else {
+            pos = 2.0 - (frac * 2);
+            movingRight = false;
+        }
+        var headX = (cx - halfWidth) + (pos * 2 * halfWidth);
+        var half = dotSize / 2.0;
+
+        for (var i = tailLen - 1; i >= 0; i -= 1) {
+            var tailX = movingRight ? headX - (i * step) : headX + (i * step);
+            var gray = 255 - ((255 * i) / tailLen).toNumber();
+            var color = (gray << 16) | (gray << 8) | gray;
+            dc.setColor(color, Graphics.COLOR_BLACK);
+            dc.fillRectangle((tailX - half).toNumber(), (y - half).toNumber(), dotSize, dotSize);
+        }
     }
 
     // Today's step count, directly under the totals row (2026, user
