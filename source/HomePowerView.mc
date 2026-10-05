@@ -419,7 +419,23 @@ class HomePowerView extends WatchUi.View {
         // graph instead (2026, user request: same treatment as Home below).
         // 116 (title bottom) + 3px gap.
         drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, 4.8, 263, 144);
-        bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", "4.6", "kW");
+        // Peak was a hardcoded "4.6" literal that never reflected real
+        // data (2026, user report: "looks like it's still from demo
+        // data") - the backend doesn't send a dedicated peak field, but
+        // solarHistory already has everything needed: today's highest
+        // hourly sample.
+        bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", kwNumber(maxOf(_model.solarHistory)), "kW");
+    }
+
+    // Highest value in a history array, 0.0 for an empty one - used for
+    // the Solar page's "PEAK" stat (today's highest hourly sample).
+    function maxOf(values) {
+        var m = 0.0;
+        for (var i = 0; i < values.size(); i += 1) {
+            var v = values[i].toFloat();
+            if (v > m) { m = v; }
+        }
+        return m;
     }
 
     function drawHome(dc) {
