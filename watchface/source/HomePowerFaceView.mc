@@ -3,8 +3,6 @@ using Toybox.Graphics;
 using Toybox.System;
 using Toybox.Application;
 using Toybox.Lang;
-using Toybox.Timer;
-using Toybox.Math;
 
 class HomePowerFaceView extends WatchUi.WatchFace {
     // Same brand palette as the companion watch app
@@ -16,8 +14,10 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     const HOME_COLOR = 0xE8ECEF;
 
     // Dimmed shades each inner-ring segment (and momentary readout) sits
-    // at while its source isn't currently active - the pulse (full
-    // color, breathing via lerpColor) is what marks the one that IS.
+    // at while its source isn't currently active - full color otherwise.
+    // Used to be an animated pulse between these two (Timer-driven), but
+    // that's gone now (2026, user request: "stop the pulsating for
+    // all") - just a static two-state color, no animation, no Timer.
     const SOLAR_DIM = 0x1F3D28;
     const GRID_DIM = 0x4A3018;
     const BATTERY_DIM = 0x3A2550;
@@ -32,28 +32,14 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     var _gridToday = 0.0;
 
     // Live instantaneous values (not today's totals) - just enough to
-    // tell which source is actively flowing right now (2026, user
-    // request: "try to pulse which source is used in the moment").
+    // tell which source is actively flowing right now.
     var _liveHome = 0.0;
     var _liveSolar = 0.0;
     var _liveGrid = 0.0;
     var _liveBatteryPower = 0.0;
 
-    // Pulse animation - only ticks while actively being looked at (same
-    // reasoning as the companion app's _pulseTimer): a continuously
-    // running Timer would defeat the point of Background-based refresh
-    // elsewhere on this face. Outside that window the system still
-    // redraws the face once a minute on its own (2026, user request:
-    // "make the update every minute") - that's the platform's default
-    // watch-face behavior, nothing extra needed for it.
-    var _pulseTimer;
-    var _pulsePhase = 0.0;
-    const PULSE_TICK_MS = 250;
-    const PULSE_STEP = 0.5;
-
     function initialize() {
         WatchFace.initialize();
-        _pulseTimer = new Timer.Timer();
     }
 
     function onLayout(dc) {
@@ -61,35 +47,6 @@ class HomePowerFaceView extends WatchUi.WatchFace {
 
     function onShow() {
         loadCachedData();
-        startPulse();
-    }
-
-    function onHide() {
-        stopPulse();
-    }
-
-    function onExitSleep() {
-        startPulse();
-    }
-
-    function onEnterSleep() {
-        stopPulse();
-    }
-
-    function startPulse() {
-        _pulseTimer.start(method(:onPulseTick), PULSE_TICK_MS, true);
-    }
-
-    function stopPulse() {
-        _pulseTimer.stop();
-    }
-
-    function onPulseTick() {
-        _pulsePhase += PULSE_STEP;
-        if (_pulsePhase > 2 * Math.PI) {
-            _pulsePhase -= 2 * Math.PI;
-        }
-        WatchUi.requestUpdate();
     }
 
     function onUpdate(dc) {
@@ -138,12 +95,10 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // elapsed-day arc span, divided among Grid/PV-direct/Battery-out by
     // their share of today's total (2026, user request: "the parallel
     // inner circle should follow the white one with the division on the
-    // power sources") - whichever source is live right now pulses,
-    // the other two sit dimmed. The outer ring pulses too, whenever the
-    // house is actively drawing any power at all (2026, user request:
-    // "pulsate when something is currently used by the house") - same
-    // dim/bright lerp mechanism, just gated on homeActive instead of
-    // one of the three source-specific flags.
+    // power sources") - whichever source is live right now shows at full
+    // color, the other two sit dimmed (no animation - see the DIM
+    // constants' comment). The outer ring follows the same rule, gated
+    // on the house actively drawing any power at all.
     function drawRings(dc, cx, cy) {
         var outerR = 205;
         var innerR = 183;
@@ -154,10 +109,9 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var dayDeg = dayFrac * 360.0;
 
         var homeActive = _liveHome > 0.05;
-        var t = (Math.sin(_pulsePhase) + 1) / 2;
 
         dc.setPenWidth(penW);
-        dc.setColor(homeActive ? lerpColor(HOME_DIM, HOME_COLOR, t) : HOME_DIM, Graphics.COLOR_BLACK);
+        dc.setColor(homeActive ? HOME_COLOR : HOME_DIM, Graphics.COLOR_BLACK);
         drawRingSegment(dc, cx, cy, outerR, dayDeg, 0.0);
 
         var total = _gridToday + _pvDirectToday + _batteryOutToday;
@@ -171,11 +125,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
             var battActive = _liveBatteryPower < -0.05;
 
             var cw = 0.0;
-            dc.setColor(gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM, Graphics.COLOR_BLACK);
+            dc.setColor(gridActive ? BRAND_ORANGE : GRID_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, gridDeg, cw);
-            dc.setColor(pvActive ? lerpColor(SOLAR_DIM, SOLAR_COLOR, t) : SOLAR_DIM, Graphics.COLOR_BLACK);
+            dc.setColor(pvActive ? SOLAR_COLOR : SOLAR_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, pvDeg, cw);
-            dc.setColor(battActive ? lerpColor(BATTERY_DIM, BATTERY_VIOLET, t) : BATTERY_DIM, Graphics.COLOR_BLACK);
+            dc.setColor(battActive ? BATTERY_VIOLET : BATTERY_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, battDeg, cw);
         }
         dc.setPenWidth(1);
@@ -199,19 +153,6 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         return cwEnd;
     }
 
-    function lerpColor(fromColor, toColor, t) {
-        var r1 = (fromColor >> 16) & 0xFF;
-        var g1 = (fromColor >> 8) & 0xFF;
-        var b1 = fromColor & 0xFF;
-        var r2 = (toColor >> 16) & 0xFF;
-        var g2 = (toColor >> 8) & 0xFF;
-        var b2 = toColor & 0xFF;
-        var r = (r1 + ((r2 - r1) * t)).toNumber();
-        var g = (g1 + ((g2 - g1) * t)).toNumber();
-        var b = (b1 + ((b2 - b1) * t)).toNumber();
-        return (r << 16) | (g << 8) | b;
-    }
-
     function drawTime(dc, cx, cy) {
         var clock = System.getClockTime();
         var timeText = clock.hour.format("%02d") + ":" + clock.min.format("%02d");
@@ -220,16 +161,16 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     }
 
     // Momentary (instantaneous, not today's totals) House/PV-direct/
-    // Grid/Battery readouts directly above the clock, each pulsing when
-    // actually active right now - same dim/pulse mechanism and
-    // active-detection as the inner ring's segments. Only Battery gets a
-    // directional triangle (2026, user request: "the triangles for in
-    // and out should be used for battery only") - it's the one source
-    // here with a real two-way flow (charging in, discharging out);
-    // House/PV/Grid are plain pulsing numbers. "PV direct" here is just
-    // the live total `solar` figure (same approximation drawRings'
-    // pvActive already makes) - the API has no live PV-to-home-only
-    // split, only today's cumulative one.
+    // Grid/Battery readouts directly above the clock, each at full color
+    // when actually active right now, dimmed otherwise (no animation -
+    // see the DIM constants' comment) - same active-detection as the
+    // inner ring's segments. Only Battery gets a directional triangle
+    // (2026, user request: "the triangles for in and out should be used
+    // for battery only") - it's the one source here with a real two-way
+    // flow (charging in, discharging out); House/PV/Grid are plain
+    // numbers. "PV direct" here is just the live total `solar` figure
+    // (same approximation drawRings' pvActive already makes) - the API
+    // has no live PV-to-home-only split, only today's cumulative one.
     function drawMomentaryLine(dc, cx, cy) {
         var font = Graphics.FONT_XTINY;
         var triLen = 7;
@@ -241,12 +182,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var pvActive = _liveSolar > 0.05;
         var gridActive = _liveGrid.abs() > 0.05;
         var battActive = _liveBatteryPower.abs() > 0.05;
-        var t = (Math.sin(_pulsePhase) + 1) / 2;
 
-        var homeColor = homeActive ? lerpColor(HOME_DIM, HOME_COLOR, t) : HOME_DIM;
-        var pvColor = pvActive ? lerpColor(SOLAR_DIM, SOLAR_COLOR, t) : SOLAR_DIM;
-        var gridColor = gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM;
-        var battColor = battActive ? lerpColor(BATTERY_DIM, BATTERY_VIOLET, t) : BATTERY_DIM;
+        var homeColor = homeActive ? HOME_COLOR : HOME_DIM;
+        var pvColor = pvActive ? SOLAR_COLOR : SOLAR_DIM;
+        var gridColor = gridActive ? BRAND_ORANGE : GRID_DIM;
+        var battColor = battActive ? BATTERY_VIOLET : BATTERY_DIM;
 
         var homeText = _liveHome.format("%.2f");
         var pvText = _liveSolar.format("%.2f");
@@ -262,7 +202,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
-        var y = cy - 100;
+        var y = cy - 96;
         var x = cx - (totalW / 2);
 
         dc.setColor(homeColor, Graphics.COLOR_BLACK);
@@ -342,7 +282,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         }
 
         var x = cx - (totalW / 2);
-        var y = cy + 39;
+        var y = cy + 41;
         for (var j = 0; j < values.size(); j += 1) {
             dc.setColor(values[j][1], Graphics.COLOR_BLACK);
             dc.drawText(x, y, font, texts[j], Graphics.TEXT_JUSTIFY_LEFT);
