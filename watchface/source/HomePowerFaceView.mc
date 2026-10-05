@@ -219,23 +219,17 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.drawText(cx, cy - 70, Graphics.FONT_NUMBER_MEDIUM, timeText, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
-    // Momentary (instantaneous, not today's totals) Grid/PV-direct/
-    // Battery-out readouts directly above the clock (2026, user request:
-    // "directly on top"), each with a small triangle that pulses when
-    // that source is actually active right now - same dim/pulse
-    // mechanism and active-detection as the inner ring's segments. House
-    // (2026, user report: "is missing the HOUSE consume") has no
-    // directional triangle - consumption is a sink, not a flow with two
-    // ends here - just a plain pulsing number. PV has no real
-    // "direction" either (a panel only ever produces), so its triangle
-    // always points inward, toward the clock, same as Grid importing;
-    // Battery-out's always points outward, matching its "out" name -
-    // only Grid's actually flips with real direction. "PV direct" here
-    // is just the live total `solar` figure (same approximation
-    // drawRings' pvActive already makes) - the API has no live
-    // PV-to-home-only split, only today's cumulative one. Smaller font
-    // than the totals row below - four groups (one with no triangle,
-    // three with) need to fit the same width budget three used to.
+    // Momentary (instantaneous, not today's totals) House/PV-direct/
+    // Grid/Battery readouts directly above the clock, each pulsing when
+    // actually active right now - same dim/pulse mechanism and
+    // active-detection as the inner ring's segments. Only Battery gets a
+    // directional triangle (2026, user request: "the triangles for in
+    // and out should be used for battery only") - it's the one source
+    // here with a real two-way flow (charging in, discharging out);
+    // House/PV/Grid are plain pulsing numbers. "PV direct" here is just
+    // the live total `solar` figure (same approximation drawRings'
+    // pvActive already makes) - the API has no live PV-to-home-only
+    // split, only today's cumulative one.
     function drawMomentaryLine(dc, cx, cy) {
         var font = Graphics.FONT_XTINY;
         var triLen = 7;
@@ -244,9 +238,9 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var groupGap = 14;
 
         var homeActive = _liveHome > 0.05;
-        var gridActive = _liveGrid.abs() > 0.05;
         var pvActive = _liveSolar > 0.05;
-        var battActive = _liveBatteryPower < -0.05;
+        var gridActive = _liveGrid.abs() > 0.05;
+        var battActive = _liveBatteryPower.abs() > 0.05;
         var t = (Math.sin(_pulsePhase) + 1) / 2;
 
         var homeColor = homeActive ? lerpColor(HOME_DIM, HOME_COLOR, t) : HOME_DIM;
@@ -256,30 +250,35 @@ class HomePowerFaceView extends WatchUi.WatchFace {
 
         var homeText = _liveHome.format("%.2f");
         var pvText = _liveSolar.format("%.2f");
-        var gridExporting = _liveGrid < 0;
         var gridText = _liveGrid.abs().format("%.2f");
-        var battMag = (_liveBatteryPower < 0) ? -_liveBatteryPower : 0.0;
-        var battText = battMag.format("%.2f");
+        var battDischarging = _liveBatteryPower < 0;
+        var battText = _liveBatteryPower.abs().format("%.2f");
 
-        // Same HOUSE/PV-direct/Grid/Battery-out order as the totals row
+        // Same HOUSE/PV-direct/Grid/Battery order as the totals row
         // below, so the two rows read as matching columns.
         var homeW = dc.getTextWidthInPixels(homeText, font);
-        var pvW = momentaryGroupWidth(dc, font, triLen, innerGap, pvText);
-        var gridW = momentaryGroupWidth(dc, font, triLen, innerGap, gridText);
+        var pvW = dc.getTextWidthInPixels(pvText, font);
+        var gridW = dc.getTextWidthInPixels(gridText, font);
         var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
-        var y = cy - 110;
+        var y = cy - 100;
         var x = cx - (totalW / 2);
 
         dc.setColor(homeColor, Graphics.COLOR_BLACK);
         dc.drawText(x, y, font, homeText, Graphics.TEXT_JUSTIFY_LEFT);
         x += homeW + groupGap;
-        x = drawMomentaryGroup(dc, x, y, font, pvColor, false, pvText, triLen, triHalfH, innerGap);
-        x += groupGap;
-        x = drawMomentaryGroup(dc, x, y, font, gridColor, gridExporting, gridText, triLen, triHalfH, innerGap);
-        x += groupGap;
-        x = drawMomentaryGroup(dc, x, y, font, battColor, true, battText, triLen, triHalfH, innerGap);
+        dc.setColor(pvColor, Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, pvText, Graphics.TEXT_JUSTIFY_LEFT);
+        x += pvW + groupGap;
+        dc.setColor(gridColor, Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, gridText, Graphics.TEXT_JUSTIFY_LEFT);
+        x += gridW + groupGap;
+        // Battery's triangle flips with real direction: discharging
+        // (flowing out) points left/outward, charging (flowing in)
+        // points right/inward - same convention the companion watch
+        // app's Overview/Battery pages use.
+        x = drawMomentaryGroup(dc, x, y, font, battColor, battDischarging, battText, triLen, triHalfH, innerGap);
     }
 
     function momentaryGroupWidth(dc, font, triLen, innerGap, text) {
