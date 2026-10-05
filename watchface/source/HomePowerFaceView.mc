@@ -6,6 +6,7 @@ using Toybox.Lang;
 using Toybox.Time;
 using Toybox.Time.Gregorian;
 using Toybox.Math;
+using Toybox.ActivityMonitor;
 
 class HomePowerFaceView extends WatchUi.WatchFace {
     // Same brand palette as the companion watch app
@@ -100,6 +101,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         drawDate(dc, cx, textCy);
         drawMomentaryLine(dc, cx, textCy);
         drawValuesLine(dc, cx, textCy);
+        drawSteps(dc, cx, textCy + 86);
         drawUpdatedText(dc, cx, h);
     }
 
@@ -609,6 +611,17 @@ class HomePowerFaceView extends WatchUi.WatchFace {
             destX = x;
         }
         dc.drawScaledBitmap(destX, y, destW, destH, bmp);
+    }
+
+    // Today's step count, directly under the totals row (2026, user
+    // request: "under the last text row add the number of steps made
+    // today") - Toybox.ActivityMonitor, not the backend; this has
+    // nothing to do with h0me-p0wer's own data.
+    function drawSteps(dc, cx, y) {
+        var info = ActivityMonitor.getInfo();
+        var steps = (info != null && info.steps != null) ? info.steps : 0;
+        drawScaledText(dc, cx, y, steps.format("%d") + " steps", Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, 0.6, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     // As low as the round bezel safely allows (2026, user request: "as
