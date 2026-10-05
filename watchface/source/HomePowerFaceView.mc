@@ -15,12 +15,13 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     const BATTERY_VIOLET = 0xC084FC;
     const HOME_COLOR = 0xE8ECEF;
 
-    // Dimmed shades each inner-ring segment sits at while its source
-    // isn't currently active - the pulse (full color, breathing via
-    // lerpColor) is what marks the one that IS.
+    // Dimmed shades each inner-ring segment (and momentary readout) sits
+    // at while its source isn't currently active - the pulse (full
+    // color, breathing via lerpColor) is what marks the one that IS.
     const SOLAR_DIM = 0x1F3D28;
     const GRID_DIM = 0x4A3018;
     const BATTERY_DIM = 0x3A2550;
+    const HOME_DIM = 0x55595C;
 
     // Today's three home-consumption sources (same fields the companion
     // app's List/Today page already uses - no backend changes needed)
@@ -31,9 +32,9 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     var _gridToday = 0.0;
 
     // Live instantaneous values (not today's totals) - just enough to
-    // tell which of the three ring segments is actively flowing right
-    // now (2026, user request: "try to pulse which source is used in
-    // the moment").
+    // tell which source is actively flowing right now (2026, user
+    // request: "try to pulse which source is used in the moment").
+    var _liveHome = 0.0;
     var _liveSolar = 0.0;
     var _liveGrid = 0.0;
     var _liveBatteryPower = 0.0;
@@ -119,6 +120,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         _pvDirectToday = getFloat(data, "solarDirectToday", _pvDirectToday);
         _batteryOutToday = getFloat(data, "batteryDischargedToday", _batteryOutToday);
         _gridToday = getFloat(data, "importedToday", _gridToday);
+        _liveHome = getFloat(data, "home", _liveHome);
         _liveSolar = getFloat(data, "solar", _liveSolar);
         _liveGrid = getFloat(data, "grid", _liveGrid);
         _liveBatteryPower = getFloat(data, "batteryPower", _liveBatteryPower);
@@ -212,50 +214,64 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     }
 
     // Momentary (instantaneous, not today's totals) Grid/PV-direct/
-    // Battery-out readouts above the clock (2026, user request), each
-    // with a small triangle that pulses when that source is actually
-    // active right now - same dim/pulse mechanism and active-detection
-    // as the inner ring's segments. PV has no real "direction" (a panel
-    // only ever produces), so its triangle always points inward, toward
-    // the clock, same as Grid importing; Battery-out's always points
-    // outward, matching its "out" name - only Grid's actually flips
-    // with real direction. "PV direct" here is just the live total
-    // `solar` figure (same approximation drawRings' pvActive already
-    // makes) - the API has no live PV-to-home-only split, only today's
-    // cumulative one.
+    // Battery-out readouts directly above the clock (2026, user request:
+    // "directly on top"), each with a small triangle that pulses when
+    // that source is actually active right now - same dim/pulse
+    // mechanism and active-detection as the inner ring's segments. House
+    // (2026, user report: "is missing the HOUSE consume") has no
+    // directional triangle - consumption is a sink, not a flow with two
+    // ends here - just a plain pulsing number. PV has no real
+    // "direction" either (a panel only ever produces), so its triangle
+    // always points inward, toward the clock, same as Grid importing;
+    // Battery-out's always points outward, matching its "out" name -
+    // only Grid's actually flips with real direction. "PV direct" here
+    // is just the live total `solar` figure (same approximation
+    // drawRings' pvActive already makes) - the API has no live
+    // PV-to-home-only split, only today's cumulative one. Smaller font
+    // than the totals row below - four groups (one with no triangle,
+    // three with) need to fit the same width budget three used to.
     function drawMomentaryLine(dc, cx, cy) {
-        var font = Graphics.FONT_TINY;
-        var triLen = 8;
-        var triHalfH = 5;
-        var innerGap = 6;
-        var groupGap = 16;
+        var font = Graphics.FONT_XTINY;
+        var triLen = 7;
+        var triHalfH = 4;
+        var innerGap = 5;
+        var groupGap = 14;
 
+        var homeActive = _liveHome > 0.05;
         var gridActive = _liveGrid.abs() > 0.05;
         var pvActive = _liveSolar > 0.05;
         var battActive = _liveBatteryPower < -0.05;
         var t = (Math.sin(_pulsePhase) + 1) / 2;
 
-        var gridColor = gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM;
+        var homeColor = homeActive ? lerpColor(HOME_DIM, HOME_COLOR, t) : HOME_DIM;
         var pvColor = pvActive ? lerpColor(SOLAR_DIM, SOLAR_COLOR, t) : SOLAR_DIM;
+        var gridColor = gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM;
         var battColor = battActive ? lerpColor(BATTERY_DIM, BATTERY_VIOLET, t) : BATTERY_DIM;
 
+        var homeText = _liveHome.format("%.2f");
+        var pvText = _liveSolar.format("%.2f");
         var gridExporting = _liveGrid < 0;
         var gridText = _liveGrid.abs().format("%.2f");
-        var pvText = _liveSolar.format("%.2f");
         var battMag = (_liveBatteryPower < 0) ? -_liveBatteryPower : 0.0;
         var battText = battMag.format("%.2f");
 
-        var gridW = momentaryGroupWidth(dc, font, triLen, innerGap, gridText);
+        // Same HOUSE/PV-direct/Grid/Battery-out order as the totals row
+        // below, so the two rows read as matching columns.
+        var homeW = dc.getTextWidthInPixels(homeText, font);
         var pvW = momentaryGroupWidth(dc, font, triLen, innerGap, pvText);
+        var gridW = momentaryGroupWidth(dc, font, triLen, innerGap, gridText);
         var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
-        var totalW = gridW + pvW + battW + (groupGap * 2);
+        var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
-        var y = cy - 135;
+        var y = cy - 120;
         var x = cx - (totalW / 2);
 
-        x = drawMomentaryGroup(dc, x, y, font, gridColor, gridExporting, gridText, triLen, triHalfH, innerGap);
-        x += groupGap;
+        dc.setColor(homeColor, Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, homeText, Graphics.TEXT_JUSTIFY_LEFT);
+        x += homeW + groupGap;
         x = drawMomentaryGroup(dc, x, y, font, pvColor, false, pvText, triLen, triHalfH, innerGap);
+        x += groupGap;
+        x = drawMomentaryGroup(dc, x, y, font, gridColor, gridExporting, gridText, triLen, triHalfH, innerGap);
         x += groupGap;
         x = drawMomentaryGroup(dc, x, y, font, battColor, true, battText, triLen, triHalfH, innerGap);
     }
@@ -321,7 +337,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         }
 
         var x = cx - (totalW / 2);
-        var y = cy + 37;
+        var y = cy + 39;
         for (var j = 0; j < values.size(); j += 1) {
             dc.setColor(values[j][1], Graphics.COLOR_BLACK);
             dc.drawText(x, y, font, texts[j], Graphics.TEXT_JUSTIFY_LEFT);
