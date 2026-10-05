@@ -68,14 +68,18 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.clear();
 
         drawRings(dc, cx, cy);
+        // All the text blocks shifted down 10px as a group (2026, user
+        // request) - rings stay anchored to the real cy, the actual
+        // circle center, so only this local textCy moves.
+        var textCy = cy + 20;
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
         // whichever is painted later wins wherever the two sit close
         // enough to overlap.
-        drawTime(dc, cx, cy);
-        drawDate(dc, cx, cy);
-        drawMomentaryLine(dc, cx, cy);
-        drawValuesLine(dc, cx, cy);
+        drawTime(dc, cx, textCy);
+        drawDate(dc, cx, textCy);
+        drawMomentaryLine(dc, cx, textCy);
+        drawValuesLine(dc, cx, textCy);
         drawUpdatedText(dc, cx, h);
     }
 
