@@ -7,6 +7,7 @@ using Toybox.Time;
 using Toybox.Time.Gregorian;
 using Toybox.Math;
 using Toybox.ActivityMonitor;
+using Toybox.Timer;
 
 class HomePowerFaceView extends WatchUi.WatchFace {
     // Same brand palette as the companion watch app
@@ -59,8 +60,21 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // idea as the companion app's "updated HH:MM" status line.
     var _updatedText = "--:--";
 
+    // Redraws just often enough for the live indicator's travel to read
+    // as smooth motion instead of visible jumps (2026, user request:
+    // "make the running pixel a bit smoother") - its position is
+    // already a continuous function of System.getTimer(), the issue was
+    // only ever how often onUpdate actually got called to repaint it.
+    // Only ticks while actively being looked at, same reasoning as the
+    // pulse timer removed earlier - this is a different, newly-
+    // requested purpose (motion, not color breathing), not that coming
+    // back.
+    var _animTimer;
+    const ANIM_TICK_MS = 150;
+
     function initialize() {
         WatchFace.initialize();
+        _animTimer = new Timer.Timer();
     }
 
     function onLayout(dc) {
@@ -68,6 +82,31 @@ class HomePowerFaceView extends WatchUi.WatchFace {
 
     function onShow() {
         loadCachedData();
+        startAnim();
+    }
+
+    function onHide() {
+        stopAnim();
+    }
+
+    function onExitSleep() {
+        startAnim();
+    }
+
+    function onEnterSleep() {
+        stopAnim();
+    }
+
+    function startAnim() {
+        _animTimer.start(method(:onAnimTick), ANIM_TICK_MS, true);
+    }
+
+    function stopAnim() {
+        _animTimer.stop();
+    }
+
+    function onAnimTick() {
+        WatchUi.requestUpdate();
     }
 
     function onUpdate(dc) {
@@ -93,7 +132,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // The time-through-steps block shifted down separately (2026,
         // user requests: +20 earlier, this block's own +5 on top of
         // that), independent of liveCy above.
-        var textCy = cy + 30;
+        var textCy = cy + 35;
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
         // whichever is painted later wins wherever the two sit close
