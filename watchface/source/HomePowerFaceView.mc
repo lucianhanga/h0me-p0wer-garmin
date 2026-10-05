@@ -407,7 +407,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // low as possible") - `h` is the full screen height, not cy, so this
     // doesn't need to know the center to sit near the very bottom edge.
     function drawUpdatedText(dc, cx, h) {
-        drawScaledText(dc, cx, h - 50, "updated " + _updatedText, Graphics.FONT_XTINY,
+        drawScaledText(dc, cx, h - 70, "updated " + _updatedText, Graphics.FONT_XTINY,
             Graphics.COLOR_LT_GRAY, 0.42);
     }
 }

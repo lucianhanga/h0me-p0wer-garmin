@@ -12,10 +12,21 @@ class HomePowerFaceApp extends Application.AppBase {
     }
 
     function onStart(state) {
-        // Make sure a refresh is always scheduled - covers both first
-        // install (nothing scheduled yet) and the app being relaunched
-        // after being force-closed mid-cycle.
-        scheduleNextRefresh();
+        // Cold start (freshly installed, or relaunched before any
+        // background fetch has ever landed) - get real data in within
+        // seconds instead of leaving the view showing its zero defaults
+        // for up to REFRESH_MINUTES (2026, user report: "did not show
+        // any values... all were on zero" - confirmed cause: this used
+        // to unconditionally call scheduleNextRefresh(), scheduling
+        // even the very FIRST fetch a full REFRESH_MINUTES out). Once
+        // data has landed at least once, onBackgroundData's own
+        // scheduleNextRefresh() call takes over for every refresh after
+        // this one.
+        if (Application.Storage.getValue("lastData") == null) {
+            Background.registerForTemporalEvent(Time.now().add(new Time.Duration(10)));
+        } else {
+            scheduleNextRefresh();
+        }
     }
 
     function onStop(state) {
