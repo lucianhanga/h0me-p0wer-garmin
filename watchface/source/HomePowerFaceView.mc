@@ -38,6 +38,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     var _liveGrid = 0.0;
     var _liveBatteryPower = 0.0;
 
+    // When the background fetch last actually landed (HomePowerFaceApp.
+    // onBackgroundData stamps this), not "now" - a tiny footer, same
+    // idea as the companion app's "updated HH:MM" status line.
+    var _updatedText = "--:--";
+
     function initialize() {
         WatchFace.initialize();
     }
@@ -68,6 +73,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         drawTime(dc, cx, cy);
         drawMomentaryLine(dc, cx, cy);
         drawValuesLine(dc, cx, cy);
+        drawUpdatedText(dc, cx, h);
     }
 
     // Reads whatever HomePowerFaceApp.onBackgroundData last cached -
@@ -85,6 +91,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         _liveSolar = getFloat(data, "solar", _liveSolar);
         _liveGrid = getFloat(data, "grid", _liveGrid);
         _liveBatteryPower = getFloat(data, "batteryPower", _liveBatteryPower);
+
+        var updated = Application.Storage.getValue("lastUpdateText");
+        if (updated != null && updated instanceof Lang.String) {
+            _updatedText = updated;
+        }
     }
 
     function getFloat(data, key, fallback) {
@@ -258,39 +269,145 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         return numX + dc.getTextWidthInPixels(text, font);
     }
 
-    // Just the four numbers, color-coded, nothing else (2026, user
-    // request: "just put the values on one line colored in the color
-    // code. nothing else") - no labels, no units. Sized down a step
-    // (2026, user request: "make the number a bit smaller not to
-    // overlap the circles") since the row's width at this height was
+    // The four today's-totals numbers, color-coded, each preceded by a
+    // small hand-drawn glyph identifying it by SHAPE too, not just color
+    // (2026, user request: "add logos which represent each value") -
+    // Monkey C has no icon font to lean on, so these are plain vector
+    // primitives. Sized down a step again (2026, user request: "make
+    // the numbers a bit smaller") to make room for them without
     // crowding the inner ring's curve. Measured and drawn as separate
     // left-justified segments (same multi-color-on-one-line trick the
     // companion app's header wordmark uses) so the whole row lands
     // centered as a group.
     function drawValuesLine(dc, cx, cy) {
-        var font = Graphics.FONT_SMALL;
-        var gap = 16;
-        var values = [
-            [_homeToday, HOME_COLOR],
-            [_pvDirectToday, SOLAR_COLOR],
-            [_gridToday, BRAND_ORANGE],
-            [_batteryOutToday, BATTERY_VIOLET],
-        ];
+        var font = Graphics.FONT_XTINY;
+        var gap = 14;
+        var iconSize = 12;
+        var iconGap = 4;
 
-        var texts = new [values.size()];
+        var texts = [
+            _homeToday.format("%.1f"),
+            _pvDirectToday.format("%.1f"),
+            _gridToday.format("%.1f"),
+            _batteryOutToday.format("%.1f"),
+        ];
+        var colors = [HOME_COLOR, SOLAR_COLOR, BRAND_ORANGE, BATTERY_VIOLET];
+
         var totalW = 0;
-        for (var i = 0; i < values.size(); i += 1) {
-            texts[i] = values[i][0].format("%.1f");
-            totalW += dc.getTextWidthInPixels(texts[i], font);
+        for (var i = 0; i < texts.size(); i += 1) {
+            totalW += iconSize + iconGap + dc.getTextWidthInPixels(texts[i], font);
             if (i > 0) { totalW += gap; }
         }
 
         var x = cx - (totalW / 2);
         var y = cy + 44;
-        for (var j = 0; j < values.size(); j += 1) {
-            dc.setColor(values[j][1], Graphics.COLOR_BLACK);
-            dc.drawText(x, y, font, texts[j], Graphics.TEXT_JUSTIFY_LEFT);
-            x += dc.getTextWidthInPixels(texts[j], font) + gap;
-        }
+        var yCenter = y + (dc.getFontHeight(font) / 2);
+
+        drawHouseIcon(dc, x + (iconSize / 2), yCenter, iconSize, colors[0]);
+        x += iconSize + iconGap;
+        dc.setColor(colors[0], Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, texts[0], Graphics.TEXT_JUSTIFY_LEFT);
+        x += dc.getTextWidthInPixels(texts[0], font) + gap;
+
+        drawSunIcon(dc, x + (iconSize / 2), yCenter, iconSize, colors[1]);
+        x += iconSize + iconGap;
+        dc.setColor(colors[1], Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, texts[1], Graphics.TEXT_JUSTIFY_LEFT);
+        x += dc.getTextWidthInPixels(texts[1], font) + gap;
+
+        drawBoltIcon(dc, x + (iconSize / 2), yCenter, iconSize, colors[2]);
+        x += iconSize + iconGap;
+        dc.setColor(colors[2], Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, texts[2], Graphics.TEXT_JUSTIFY_LEFT);
+        x += dc.getTextWidthInPixels(texts[2], font) + gap;
+
+        drawBatteryIcon(dc, x + (iconSize / 2), yCenter, iconSize, colors[3]);
+        x += iconSize + iconGap;
+        dc.setColor(colors[3], Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, texts[3], Graphics.TEXT_JUSTIFY_LEFT);
+    }
+
+    // House: a simple pentagon silhouette (peaked roof + square base) in
+    // one fillPolygon call.
+    function drawHouseIcon(dc, x, yCenter, size, color) {
+        var half = size / 2.0;
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillPolygon([
+            [x, yCenter - half],
+            [x - half, yCenter - (half * 0.15)],
+            [x - half, yCenter + half],
+            [x + half, yCenter + half],
+            [x + half, yCenter - (half * 0.15)],
+        ]);
+    }
+
+    // PV direct: a filled circle with four short rays - a plain sun.
+    function drawSunIcon(dc, x, yCenter, size, color) {
+        var half = size / 2.0;
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillCircle(x, yCenter, half * 0.55);
+        dc.drawLine(x, yCenter - half, x, yCenter - (half * 0.65));
+        dc.drawLine(x, yCenter + (half * 0.65), x, yCenter + half);
+        dc.drawLine(x - half, yCenter, x - (half * 0.65), yCenter);
+        dc.drawLine(x + (half * 0.65), yCenter, x + half, yCenter);
+    }
+
+    // Grid: a simple lightning-bolt zigzag, one fillPolygon call.
+    function drawBoltIcon(dc, x, yCenter, size, color) {
+        var half = size / 2.0;
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillPolygon([
+            [x - (half * 0.2), yCenter - half],
+            [x + (half * 0.5), yCenter - (half * 0.1)],
+            [x, yCenter - (half * 0.1)],
+            [x + (half * 0.2), yCenter + half],
+            [x - (half * 0.5), yCenter + (half * 0.1)],
+            [x, yCenter + (half * 0.1)],
+        ]);
+    }
+
+    // Battery: a rounded-rectangle body with a small terminal nub.
+    function drawBatteryIcon(dc, x, yCenter, size, color) {
+        var half = size / 2.0;
+        var bodyW = size * 0.8;
+        var bodyH = size * 0.55;
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillRoundedRectangle((x - half).toNumber(), (yCenter - (bodyH / 2)).toNumber(),
+            bodyW.toNumber(), bodyH.toNumber(), 2);
+        var nubW = size * 0.15;
+        var nubH = bodyH * 0.5;
+        dc.fillRectangle((x - half + bodyW).toNumber(), (yCenter - (nubH / 2)).toNumber(),
+            nubW.toNumber(), nubH.toNumber());
+    }
+
+    // Renders text at `font`'s native size into an offscreen buffer,
+    // then blits it scaled down by `scale` - genuinely smaller than any
+    // text font this device exposes, same bitmap-scaling technique the
+    // companion watch app's drawScaledText uses (2026, user request:
+    // "a very small timestamp"). Center-justified only - the one caller
+    // here doesn't need more.
+    function drawScaledText(dc, cx, y, text, font, color, scale) {
+        var tw = dc.getTextWidthInPixels(text, font);
+        var th = dc.getFontHeight(font);
+        if (tw <= 0 || th <= 0) { return; }
+
+        var bmpRef = Graphics.createBufferedBitmap({ :width => tw, :height => th });
+        var bmp = bmpRef.get();
+        var bdc = bmp.getDc();
+        bdc.setColor(color, Graphics.COLOR_BLACK);
+        bdc.clear();
+        bdc.drawText(0, 0, font, text, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var destW = (tw * scale).toNumber();
+        var destH = (th * scale).toNumber();
+        dc.drawScaledBitmap(cx - (destW / 2), y, destW, destH, bmp);
+    }
+
+    // As low as the round bezel safely allows (2026, user request: "as
+    // low as possible") - `h` is the full screen height, not cy, so this
+    // doesn't need to know the center to sit near the very bottom edge.
+    function drawUpdatedText(dc, cx, h) {
+        drawScaledText(dc, cx, h - 30, "updated " + _updatedText, Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, 0.42);
     }
 }

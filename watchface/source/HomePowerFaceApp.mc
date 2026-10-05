@@ -1,6 +1,7 @@
 using Toybox.Application;
 using Toybox.Background;
 using Toybox.Lang;
+using Toybox.System;
 using Toybox.Time;
 using Toybox.WatchUi;
 
@@ -38,6 +39,12 @@ class HomePowerFaceApp extends Application.AppBase {
     function onBackgroundData(data) {
         if (data != null) {
             Application.Storage.setValue("lastData", data);
+            // Stamped here, not read live in the view - this marks when
+            // data actually arrived, not "now" (2026, user request: "put
+            // a very small timestamp").
+            var clock = System.getClockTime();
+            Application.Storage.setValue("lastUpdateText",
+                clock.hour.format("%02d") + ":" + clock.min.format("%02d"));
         }
         scheduleNextRefresh();
         WatchUi.requestUpdate();
