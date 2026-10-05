@@ -82,17 +82,17 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.clear();
 
         drawRings(dc, cx, cy);
-        // All the text blocks shifted down 10px as a group (2026, user
-        // request) - rings stay anchored to the real cy, the actual
-        // circle center, so only this local textCy moves.
-        var textCy = cy + 20;
-        // Solar graph fills the space between the rings' inner top
-        // curve and the momentary row, previously empty (2026, user
-        // request: "take the graph for SOLAR and try to put it above
-        // the first text row... fits into the remaining space") - tied
-        // to textCy (follows the momentary row if that ever moves
-        // again) rather than the unshifted cy.
-        drawSolarGraph(dc, cx, textCy - 92, 68);
+        // Solar graph stays anchored to its own fixed offset from the
+        // real cy - it's a graph, not part of "the block of text
+        // starting with the time and ending with the steps" (2026, user
+        // request for that block specifically), so it doesn't move with
+        // textBlockCy below.
+        drawSolarGraph(dc, cx, (cy + 20) - 92, 68);
+        // The text block (time through steps) shifted down as a group,
+        // separately from both the rings (anchored to the real cy) and
+        // the solar graph above (2026, user requests, most recently "5
+        // pixels lower" on top of an earlier +20).
+        var textCy = cy + 25;
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
         // whichever is painted later wins wherever the two sit close
