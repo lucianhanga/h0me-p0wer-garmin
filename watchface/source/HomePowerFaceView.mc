@@ -139,7 +139,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // their share of today's total (2026, user request: "the parallel
     // inner circle should follow the white one with the division on the
     // power sources") - whichever source is live right now pulses,
-    // the other two sit dimmed.
+    // the other two sit dimmed. The outer ring pulses too, whenever the
+    // house is actively drawing any power at all (2026, user request:
+    // "pulsate when something is currently used by the house") - same
+    // dim/bright lerp mechanism, just gated on homeActive instead of
+    // one of the three source-specific flags.
     function drawRings(dc, cx, cy) {
         var outerR = 205;
         var innerR = 183;
@@ -149,8 +153,11 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var dayFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
         var dayDeg = dayFrac * 360.0;
 
+        var homeActive = _liveHome > 0.05;
+        var t = (Math.sin(_pulsePhase) + 1) / 2;
+
         dc.setPenWidth(penW);
-        dc.setColor(HOME_COLOR, Graphics.COLOR_BLACK);
+        dc.setColor(homeActive ? lerpColor(HOME_DIM, HOME_COLOR, t) : HOME_DIM, Graphics.COLOR_BLACK);
         drawRingSegment(dc, cx, cy, outerR, dayDeg, 0.0);
 
         var total = _gridToday + _pvDirectToday + _batteryOutToday;
@@ -162,7 +169,6 @@ class HomePowerFaceView extends WatchUi.WatchFace {
             var gridActive = _liveGrid > 0.05;
             var pvActive = _liveSolar > 0.05;
             var battActive = _liveBatteryPower < -0.05;
-            var t = (Math.sin(_pulsePhase) + 1) / 2;
 
             var cw = 0.0;
             dc.setColor(gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM, Graphics.COLOR_BLACK);
@@ -263,7 +269,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
-        var y = cy - 120;
+        var y = cy - 110;
         var x = cx - (totalW / 2);
 
         dc.setColor(homeColor, Graphics.COLOR_BLACK);
