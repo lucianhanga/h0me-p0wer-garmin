@@ -5,6 +5,7 @@ using Toybox.Application;
 using Toybox.Lang;
 using Toybox.Time;
 using Toybox.Time.Gregorian;
+using Toybox.Math;
 
 class HomePowerFaceView extends WatchUi.WatchFace {
     // Same brand palette as the companion watch app
@@ -25,6 +26,12 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     const BATTERY_DIM = 0x3A2550;
     const HOME_DIM = 0x55595C;
 
+    // Solar graph's stacked-area split - same composition/colors as the
+    // companion watch app's Solar page (PV-to-battery under PV-to-home,
+    // total production traced on top).
+    const PV_BATTERY_BAND = 0x3DA568;
+    const PV_HOME_BAND = 0x8EE3A8;
+
     // Today's three home-consumption sources (same fields the companion
     // app's List/Today page already uses - no backend changes needed)
     // plus the total they sum to, cached from the background fetch.
@@ -39,6 +46,12 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     var _liveSolar = 0.0;
     var _liveGrid = 0.0;
     var _liveBatteryPower = 0.0;
+
+    // Today's hourly solar samples, midnight to now - same fields the
+    // companion watch app's Solar page graph uses, same backend
+    // contract, no changes needed there.
+    var _solarHistory = [];
+    var _solarBatteryHistory = [];
 
     // When the background fetch last actually landed (HomePowerFaceApp.
     // onBackgroundData stamps this), not "now" - a tiny footer, same
@@ -72,6 +85,13 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // request) - rings stay anchored to the real cy, the actual
         // circle center, so only this local textCy moves.
         var textCy = cy + 20;
+        // Solar graph fills the space between the rings' inner top
+        // curve and the momentary row, previously empty (2026, user
+        // request: "take the graph for SOLAR and try to put it above
+        // the first text row... fits into the remaining space") - tied
+        // to textCy (follows the momentary row if that ever moves
+        // again) rather than the unshifted cy.
+        drawSolarGraph(dc, cx, textCy - 92, 68);
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
         // whichever is painted later wins wherever the two sit close
@@ -99,6 +119,13 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         _liveGrid = getFloat(data, "grid", _liveGrid);
         _liveBatteryPower = getFloat(data, "batteryPower", _liveBatteryPower);
 
+        if (data.hasKey("solarHistory") && data["solarHistory"] != null) {
+            _solarHistory = data["solarHistory"];
+        }
+        if (data.hasKey("solarBatteryHistory") && data["solarBatteryHistory"] != null) {
+            _solarBatteryHistory = data["solarBatteryHistory"];
+        }
+
         var updated = Application.Storage.getValue("lastUpdateText");
         if (updated != null && updated instanceof Lang.String) {
             _updatedText = updated;
@@ -124,7 +151,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     function drawRings(dc, cx, cy) {
         var outerR = 205;
         var innerR = 183;
-        var penW = 12;
+        var penW = 9;
 
         var clock = System.getClockTime();
         var dayFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
@@ -173,6 +200,109 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var mathEnd = 90 - cwEnd;
         dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE, mathStart, mathEnd);
         return cwEnd;
+    }
+
+    // Stacked-area day graph in the space between the rings' inner top
+    // curve and the momentary row, previously empty (2026, user
+    // request) - same composition as the companion watch app's Solar
+    // page (PV-to-battery under PV-to-home, total production line on
+    // top), midnight-to-now on the x-axis. `chartW` is fixed rather
+    // than derived from the circle's chord width at this height on
+    // purpose: the chord narrows fast this close to the ring, so the
+    // WIDTH that matters is the narrowest point across the chart's full
+    // height (near its top), not at baselineY - tuned empirically
+    // against a screenshot instead of computed, same as the date's
+    // position above.
+    function drawSolarGraph(dc, cx, baselineY, maxH) {
+        var count = _solarHistory.size();
+        if (count <= 0) { return; }
+
+        var chartW = 220;
+        var left = cx - (chartW / 2);
+        var right = cx + (chartW / 2);
+
+        dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
+        dc.drawLine(left, baselineY, right, baselineY);
+
+        // Dynamic Y-axis scale from today's own peak, not a hardcoded
+        // ceiling (2026 regression already fixed once in the companion
+        // app for the same reason: a quiet day's real peak sits well
+        // under any fixed guess, wasting most of the chart's height).
+        var peak = maxOf(_solarHistory);
+        var maxAbs = peak * 1.1;
+        if (maxAbs < 0.5) { maxAbs = 0.5; }
+
+        var clock = System.getClockTime();
+        var nowFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
+        var nowX = left + (nowFrac * chartW);
+
+        var battCount = _solarBatteryHistory.size();
+
+        var xs = new [count];
+        var battYs = new [count];
+        var totalYs = new [count];
+        for (var i = 0; i < count; i += 1) {
+            xs[i] = (count > 1) ? (left + ((i.toFloat() / (count - 1)) * (nowX - left))) : nowX;
+            var totalVal = _solarHistory[i];
+            var battVal = 0.0;
+            if (battCount > 0) {
+                // Nearest-neighbor resample onto totalValues' own index
+                // range - battValues can be a different (shorter/demo
+                // fallback) length, same fix already proven in the
+                // companion app's Solar graph.
+                var battIdx = (count > 1 && battCount > 1)
+                    ? Math.round((i.toFloat() / (count - 1)) * (battCount - 1)).toNumber()
+                    : 0;
+                battVal = _solarBatteryHistory[battIdx];
+            }
+            if (battVal.toFloat().abs() > totalVal.toFloat().abs()) { battVal = totalVal; }
+            battYs[i] = solarGraphY(battVal, maxAbs, baselineY, maxH);
+            totalYs[i] = solarGraphY(totalVal, maxAbs, baselineY, maxH);
+        }
+
+        if (count > 1) {
+            for (var i = 1; i < count; i += 1) {
+                dc.setColor(PV_BATTERY_BAND, Graphics.COLOR_BLACK);
+                dc.fillPolygon([
+                    [xs[i - 1], baselineY], [xs[i], baselineY],
+                    [xs[i], battYs[i]], [xs[i - 1], battYs[i - 1]],
+                ]);
+                dc.setColor(PV_HOME_BAND, Graphics.COLOR_BLACK);
+                dc.fillPolygon([
+                    [xs[i - 1], battYs[i - 1]], [xs[i], battYs[i]],
+                    [xs[i], totalYs[i]], [xs[i - 1], totalYs[i - 1]],
+                ]);
+            }
+
+            dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
+            dc.setPenWidth(2);
+            for (var j = 1; j < count; j += 1) {
+                dc.drawLine(xs[j - 1], totalYs[j - 1], xs[j], totalYs[j]);
+            }
+            dc.setPenWidth(1);
+        }
+
+        // Plain dot, not pulsing - no animation anywhere on this face
+        // anymore (2026, user request: "stop the pulsating for all").
+        dc.setColor(SOLAR_COLOR, Graphics.COLOR_BLACK);
+        dc.fillCircle(xs[count - 1], totalYs[count - 1], 3);
+    }
+
+    function solarGraphY(value, maxAbs, baselineY, maxH) {
+        var h = ((value.toFloat().abs() / maxAbs) * maxH).toNumber();
+        if (h < 0) { h = 0; }
+        if (h > maxH) { h = maxH; }
+        return baselineY - h;
+    }
+
+    // Highest value in a history array, 0.0 for an empty one.
+    function maxOf(values) {
+        var m = 0.0;
+        for (var i = 0; i < values.size(); i += 1) {
+            var v = values[i].toFloat();
+            if (v > m) { m = v; }
+        }
+        return m;
     }
 
     // Seconds appended as a smaller, dimmer, bitmap-scaled suffix (2026,
