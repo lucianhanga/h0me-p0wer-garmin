@@ -82,16 +82,17 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.clear();
 
         drawRings(dc, cx, cy);
-        // Solar graph stays anchored to its own fixed offset from the
-        // real cy - it's a graph, not part of "the block of text
-        // starting with the time and ending with the steps" (2026, user
-        // request for that block specifically), so it doesn't move with
-        // textBlockCy below.
-        drawSolarGraph(dc, cx, (cy + 20) - 92, 68);
-        // The text block (time through steps) shifted down as a group,
-        // separately from both the rings (anchored to the real cy) and
-        // the solar graph above (2026, user requests, most recently "5
-        // pixels lower" on top of an earlier +20).
+        // The momentary row (+ its live indicator) and the solar graph
+        // above it stay at the OLD anchor - the "5 pixels lower" ask
+        // was specifically for "the block of text starting with the
+        // time... not from live values above the time" (2026, user
+        // correction - an earlier pass wrongly moved this row too,
+        // since it shared textCy with the time block below).
+        var liveCy = cy + 20;
+        drawSolarGraph(dc, cx, liveCy - 92, 68);
+        // The time-through-steps block shifted down separately (2026,
+        // user requests: +20 earlier, this block's own +5 on top of
+        // that), independent of liveCy above.
         var textCy = cy + 25;
         // Time drawn BEFORE the momentary row now, not after (2026, user
         // report: "they are behind") - draws happen back-to-front, so
@@ -99,7 +100,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // enough to overlap.
         drawTime(dc, cx, textCy);
         drawDate(dc, cx, textCy);
-        drawMomentaryLine(dc, cx, textCy);
+        drawMomentaryLine(dc, cx, liveCy);
         // A small traveling dot with a fading tail, bouncing left-right
         // right under the momentary row, to mark it as the live one
         // (2026, user request: "emphasise that the row above the time
@@ -111,7 +112,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // active is all the animation needs; no new continuously
         // running Timer (2026, user request earlier: "stop the
         // pulsating for all" - this doesn't bring that back).
-        drawLiveIndicator(dc, cx, textCy - 44, 100);
+        drawLiveIndicator(dc, cx, liveCy - 44, 100);
         drawValuesLine(dc, cx, textCy);
         drawSteps(dc, cx, textCy + 86);
         drawUpdatedText(dc, cx, h);
