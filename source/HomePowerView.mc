@@ -233,25 +233,26 @@ class HomePowerView extends WatchUi.View {
         // "GRID ->" (importing/pulling, triangle after) - direction via a
         // drawn, pulsing triangle instead of a +/- sign.
         var exporting = _model.gridKw < 0;
-        drawDirectionalLabel(dc, leftX, row2Y, "GRID", exporting, BRAND_ORANGE, 0x4A3018);
+        drawDirectionalLabel(dc, leftX, row2Y, "GRID", exporting, BRAND_ORANGE, 0x4A3018, false);
         overviewValue(dc, leftX, row2Y, kwNumber(_model.gridKw.abs()), "kW");
 
         // Charge/discharge rate (2026, user request: "how much you pull
         // from battery too" - the Live tab equivalent on the phone app
         // shows this rate, not just the charge %, which stays available
-        // on the Battery page). Same triangle-before/after-word pattern
-        // as Grid: discharging (out of the battery) mirrors "exporting" -
-        // triangle before the word; charging (into the battery) mirrors
-        // "importing" - triangle after. Violet discharging, grey
-        // charging/idle, the web app's own battery color convention.
+        // on the Battery page). Battery always stays its identity violet
+        // now (2026, user request: "follow the color convention" - no
+        // more muted grey while charging). Discharging still positions
+        // the triangle before the word, pointing away (energy leaving);
+        // charging positions it after the word but points it BACK at
+        // "BATTERY" instead (2026, user report: charging is the dominant
+        // state and the arrow should visually flow INTO the battery, not
+        // away from it).
         var charging = _model.batteryKw > 0.02;
         var discharging = _model.batteryKw < -0.02;
-        var batteryColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
         if (charging || discharging) {
-            var dim = charging ? 0x2E3134 : 0x3A2550;
-            drawDirectionalLabel(dc, rightX, row2Y, "BATTERY", discharging, batteryColor, dim);
+            drawDirectionalLabel(dc, rightX, row2Y, "BATTERY", discharging, BATTERY_VIOLET, 0x3A2550, charging);
         } else {
-            overviewLabel(dc, rightX, row2Y, "BATTERY", BATTERY_CHARGE_GREY);
+            overviewLabel(dc, rightX, row2Y, "BATTERY", BATTERY_VIOLET);
         }
         overviewValue(dc, rightX, row2Y, kwNumber(_model.batteryKw.abs()), "kW");
     }
@@ -264,11 +265,16 @@ class HomePowerView extends WatchUi.View {
     // `word` + a drawn triangle, pulsing between `dimColor` and `color` -
     // a filled polygon rather than a text arrow glyph, since font arrow
     // glyph support isn't guaranteed on this device. `triangleBefore`
-    // puts a left-pointing triangle before the word (e.g. Grid exporting,
-    // Battery discharging - both "flowing out"); false puts a
-    // right-pointing triangle after it (Grid importing, Battery charging
-    // - both "flowing in"). Shared by the Grid and Battery cells.
-    function drawDirectionalLabel(dc, x, y, word, triangleBefore, color, dimColor) {
+    // controls which SIDE of the word the triangle sits on (true = left/
+    // before, false = right/after). `pointInward` controls which way its
+    // apex faces, independent of that side: false points it further away
+    // from the word (Grid's "<- GRID" / "GRID ->" - both read as flow
+    // leaving toward the thing named); true points it back at the word
+    // instead (2026, user report: Battery's charging arrow pointed away
+    // from "BATTERY" when charging is the dominant state and should
+    // visually flow INTO it - discharging's "away" reading was already
+    // correct, so only charging needed the apex flipped, not the side).
+    function drawDirectionalLabel(dc, x, y, word, triangleBefore, color, dimColor, pointInward) {
         var wordW = dc.getTextWidthInPixels(word, Graphics.FONT_XTINY);
         var gap = 8;
         var triLen = 13;
@@ -292,18 +298,19 @@ class HomePowerView extends WatchUi.View {
 
         var t = (Math.sin(_pulsePhase) + 1) / 2; // 0..1 breathing factor
         dc.setColor(lerpColor(dimColor, color, t), Graphics.COLOR_BLACK);
+        var apexRight = pointInward ? triangleBefore : !triangleBefore;
         var points;
-        if (triangleBefore) {
-            points = [
-                [cxTri - (triLen / 2), cyTri],
-                [cxTri + (triLen / 2), cyTri - triHalfH],
-                [cxTri + (triLen / 2), cyTri + triHalfH],
-            ];
-        } else {
+        if (apexRight) {
             points = [
                 [cxTri + (triLen / 2), cyTri],
                 [cxTri - (triLen / 2), cyTri - triHalfH],
                 [cxTri - (triLen / 2), cyTri + triHalfH],
+            ];
+        } else {
+            points = [
+                [cxTri - (triLen / 2), cyTri],
+                [cxTri + (triLen / 2), cyTri - triHalfH],
+                [cxTri + (triLen / 2), cyTri + triHalfH],
             ];
         }
         dc.fillPolygon(points);
@@ -312,7 +319,8 @@ class HomePowerView extends WatchUi.View {
     // Same idea as drawDirectionalLabel, sized for a page title (FONT_SMALL)
     // instead of the compact Overview cells (FONT_XTINY) - used by the
     // Battery page's title to show charge/discharge direction there too.
-    function drawDirectionalTitle(dc, label, triangleBefore, color, dimColor) {
+    // `pointInward` - see drawDirectionalLabel's comment.
+    function drawDirectionalTitle(dc, label, triangleBefore, color, dimColor, pointInward) {
         var w = dc.getWidth();
         var cx = w / 2;
         var y = 63;
@@ -339,18 +347,19 @@ class HomePowerView extends WatchUi.View {
 
         var t = (Math.sin(_pulsePhase) + 1) / 2;
         dc.setColor(lerpColor(dimColor, color, t), Graphics.COLOR_BLACK);
+        var apexRight = pointInward ? triangleBefore : !triangleBefore;
         var points;
-        if (triangleBefore) {
-            points = [
-                [cxTri - (triLen / 2), cyTri],
-                [cxTri + (triLen / 2), cyTri - triHalfH],
-                [cxTri + (triLen / 2), cyTri + triHalfH],
-            ];
-        } else {
+        if (apexRight) {
             points = [
                 [cxTri + (triLen / 2), cyTri],
                 [cxTri - (triLen / 2), cyTri - triHalfH],
                 [cxTri - (triLen / 2), cyTri + triHalfH],
+            ];
+        } else {
+            points = [
+                [cxTri - (triLen / 2), cyTri],
+                [cxTri + (triLen / 2), cyTri - triHalfH],
+                [cxTri + (triLen / 2), cyTri + triHalfH],
             ];
         }
         dc.fillPolygon(points);
@@ -417,18 +426,25 @@ class HomePowerView extends WatchUi.View {
         // No separate current-value line here - the pulsing dot's position
         // on the graph already shows it, and the freed space goes to the
         // graph instead (2026, user request: same treatment as Home below).
+        // Y-axis scale was a hardcoded 4.8 ceiling (2026, user report:
+        // "a lot of space unused for the visualization... make other y
+        // axis resolution") - a quiet/cloudy day's real peak sits well
+        // under that, so the curve never reached anywhere near the top.
+        // Derived from today's actual peak instead, so the chart always
+        // uses its full height regardless of how big that peak is. 10%
+        // headroom keeps the peak off the very top pixel; a 0.5 kW floor
+        // keeps a near-zero night from blowing the scale up around noise.
+        var peak = maxOf(_model.solarHistory);
+        var maxAbs = peak * 1.1;
+        if (maxAbs < 0.5) { maxAbs = 0.5; }
         // 116 (title bottom) + 3px gap.
-        drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, 4.8, 263, 144);
-        // Peak was a hardcoded "4.6" literal that never reflected real
-        // data (2026, user report: "looks like it's still from demo
-        // data") - the backend doesn't send a dedicated peak field, but
-        // solarHistory already has everything needed: today's highest
-        // hourly sample.
-        bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", kwNumber(maxOf(_model.solarHistory)), "kW");
+        drawSolarDayGraph(dc, _model.solarHistory, _model.solarBatteryHistory, maxAbs, 263, 144);
+        bottomPair(dc, "TODAY", kwhNumber(_model.solarTodayKwh), "kWh", "PEAK", kwNumber(peak), "kW");
     }
 
     // Highest value in a history array, 0.0 for an empty one - used for
-    // the Solar page's "PEAK" stat (today's highest hourly sample).
+    // the Solar page's "PEAK" stat and both pages' dynamic Y-axis scale
+    // (today's highest hourly sample).
     function maxOf(values) {
         var m = 0.0;
         for (var i = 0; i < values.size(); i += 1) {
@@ -442,9 +458,13 @@ class HomePowerView extends WatchUi.View {
         title(dc, "HOME", HOME_COLOR);
         // No separate current-value line here - "NOW" in the bottom row
         // already shows it, and the freed space goes to the bars instead.
+        // Same dynamic Y-axis scale as Solar, derived from today's actual
+        // peak hourly consumption instead of a hardcoded 3.0 ceiling.
+        var maxAbs = maxOf(_model.homeHistory) * 1.1;
+        if (maxAbs < 0.5) { maxAbs = 0.5; }
         // 116 (title bottom) + 3px gap.
         drawHomeStackedBars(dc, _model.homeHistory, _model.homeFromGridHistory,
-            _model.homeFromBatteryHistory, 3.0, 263, 144);
+            _model.homeFromBatteryHistory, maxAbs, 263, 144);
         bottomPair(dc, "TODAY", kwhNumber(_model.homeTodayKwh), "kWh", "NOW", kwNumber(_model.homeKw), "kW");
     }
 
@@ -456,17 +476,35 @@ class HomePowerView extends WatchUi.View {
         var discharging = _model.batteryKw < -0.02;
 
         // Title carries the same pulsing direction triangle as Overview's
-        // Battery cell (2026, user request: "like you did with grid").
+        // Battery cell (2026, user request: "like you did with grid") -
+        // always violet now, triangle pointing INTO the word while
+        // charging (see drawDirectionalLabel's comment - same fix as
+        // Overview's Battery cell, both reported together).
         if (charging || discharging) {
-            var titleDim = charging ? 0x2E3134 : 0x3A2550;
-            var titleColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
-            drawDirectionalTitle(dc, "BATTERY", discharging, titleColor, titleDim);
+            drawDirectionalTitle(dc, "BATTERY", discharging, BATTERY_VIOLET, 0x3A2550, charging);
         } else {
             title(dc, "BATTERY", BATTERY_VIOLET);
         }
 
+        // kWh equivalent of the charge % (2026, user request: "I need it
+        // also in kWh", later: "write the value bigger") - derived
+        // client-side from capacity * pct, no new backend field needed.
+        // Dimmer than the percent (still secondary to it) but sized up
+        // from the original 0.5, vertically centered against it the same
+        // way the List page's per-row "kWh" suffix is.
+        var currentKwh = _model.batteryCapacityKwh * _model.batteryPct / 100.0;
+        var pctText = _model.batteryPct.format("%d") + "%";
+        var kwhText = " · " + currentKwh.format("%.1f") + " kWh";
+        var pctW = dc.getTextWidthInPixels(pctText, Graphics.FONT_MEDIUM);
+        var battKwhScale = 0.72;
+        var battKwhW = (dc.getTextWidthInPixels(kwhText, Graphics.FONT_XTINY) * battKwhScale).toNumber();
+        var pctStartX = cx - ((pctW + battKwhW) / 2);
+        var pctNumH = dc.getFontHeight(Graphics.FONT_MEDIUM);
+        var battKwhH = (dc.getFontHeight(Graphics.FONT_XTINY) * battKwhScale).toNumber();
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, 116, Graphics.FONT_MEDIUM, _model.batteryPct.format("%d") + "%", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(pctStartX, 116, Graphics.FONT_MEDIUM, pctText, Graphics.TEXT_JUSTIFY_LEFT);
+        drawScaledText(dc, pctStartX + pctW, 116 + ((pctNumH - battKwhH) / 2), kwhText, Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, battKwhScale, Graphics.TEXT_JUSTIFY_LEFT);
 
         // Low/high SOC thresholds, genuinely smaller than any real text
         // font via drawScaledText (see its own comment) - a full XTINY
@@ -504,12 +542,11 @@ class HomePowerView extends WatchUi.View {
         dc.drawLine(maxX, barY - 4, maxX, barY + barH + 4);
         dc.setPenWidth(1);
 
-        // Rate DOES encode direction, so it switches color same as the
-        // Overview cell: violet discharging, grey charging.
-        var rateColor = discharging ? BATTERY_VIOLET : BATTERY_CHARGE_GREY;
+        // Always violet now (2026, user request - no more grey while
+        // charging, matches the title/Overview cell above).
         // 206 + 16 (bar height) + 9px gap.
         drawSplitUnit(dc, cx, 231, signedKwNumber(_model.batteryKw), "kW", Graphics.FONT_MEDIUM, Graphics.FONT_XTINY,
-            rateColor, Graphics.TEXT_JUSTIFY_CENTER);
+            BATTERY_VIOLET, Graphics.TEXT_JUSTIFY_CENTER);
 
         // Time to the applicable limit for the CURRENT direction - "to
         // full" while charging, "to empty" (reaching the low-SOC floor)
