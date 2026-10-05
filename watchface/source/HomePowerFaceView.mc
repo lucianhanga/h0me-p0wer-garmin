@@ -338,7 +338,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         }
 
         var x = cx - (totalW / 2);
-        var y = cy + 44;
+        var y = cy + 41;
         var yCenter = y + (dc.getFontHeight(font) / 2);
 
         drawHouseIcon(dc, x + (iconSize / 2), yCenter, iconSize, colors[0]);
