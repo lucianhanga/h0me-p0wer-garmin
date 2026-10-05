@@ -3,6 +3,8 @@ using Toybox.Graphics;
 using Toybox.System;
 using Toybox.Application;
 using Toybox.Lang;
+using Toybox.Time;
+using Toybox.Time.Gregorian;
 
 class HomePowerFaceView extends WatchUi.WatchFace {
     // Same brand palette as the companion watch app
@@ -71,6 +73,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         // whichever is painted later wins wherever the two sit close
         // enough to overlap.
         drawTime(dc, cx, cy);
+        drawDate(dc, cx, cy);
         drawMomentaryLine(dc, cx, cy);
         drawValuesLine(dc, cx, cy);
         drawUpdatedText(dc, cx, h);
@@ -168,30 +171,79 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         return cwEnd;
     }
 
+    // Seconds appended as a smaller, dimmer, bitmap-scaled suffix (2026,
+    // user request: "add seconds to the time") - scaled rather than a
+    // second named font so its size is exactly known relative to the
+    // big digits, vertically centered against the measured font height
+    // (reliable for THIS centering math, even though that same measured
+    // height turned out not to reliably predict the digits' visual
+    // bottom edge for placing the date below - see drawDate's comment).
     function drawTime(dc, cx, cy) {
         var clock = System.getClockTime();
         var timeText = clock.hour.format("%02d") + ":" + clock.min.format("%02d");
+        var secText = ":" + clock.sec.format("%02d");
+
+        // FONT_NUMBER_MILD, not MEDIUM - a bit smaller (2026, user
+        // request: "make the watch main time font a bit smaller").
+        var timeFont = Graphics.FONT_NUMBER_MILD;
+        var timeW = dc.getTextWidthInPixels(timeText, timeFont);
+        var timeH = dc.getFontHeight(timeFont);
+        var y = cy - 70;
+
+        var secScale = 0.5;
+        var secTw = dc.getTextWidthInPixels(secText, Graphics.FONT_TINY);
+        var secTh = dc.getFontHeight(Graphics.FONT_TINY);
+        var secDestW = (secTw * secScale).toNumber();
+        var secDestH = (secTh * secScale).toNumber();
+        var gap = 4;
+
+        var startX = cx - ((timeW + gap + secDestW) / 2);
+
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
-        dc.drawText(cx, cy - 70, Graphics.FONT_NUMBER_MEDIUM, timeText, Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(startX, y, timeFont, timeText, Graphics.TEXT_JUSTIFY_LEFT);
+
+        var secY = y + ((timeH - secDestH) / 2);
+        drawScaledText(dc, startX + timeW + gap, secY, secText, Graphics.FONT_TINY,
+            Graphics.COLOR_LT_GRAY, secScale, Graphics.TEXT_JUSTIFY_LEFT);
+    }
+
+    // Small date line directly under the time (2026, user request: "I
+    // also want the date") - "Oct 5" style via Gregorian.FORMAT_MEDIUM's
+    // abbreviated month name. A fixed offset from cy, not from
+    // drawTime's measured font height - that measured height turned out
+    // to include much more padding than the digits' actual visual
+    // bottom (twice: first with FONT_NUMBER_MEDIUM, then again after
+    // switching to MILD), landing the date on top of the totals row
+    // both times. Tuned empirically against a screenshot instead.
+    function drawDate(dc, cx, cy) {
+        var info = Gregorian.info(Time.now(), Time.FORMAT_MEDIUM);
+        var dateText = info.month + " " + info.day;
+        drawScaledText(dc, cx, cy + 16, dateText, Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.55,
+            Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     // Momentary (instantaneous, not today's totals) House/PV-direct/
     // Grid/Battery readouts directly above the clock, each at full color
     // when actually active right now, dimmed otherwise (no animation -
     // see the DIM constants' comment) - same active-detection as the
-    // inner ring's segments. Only Battery gets a directional triangle
-    // (2026, user request: "the triangles for in and out should be used
-    // for battery only") - it's the one source here with a real two-way
-    // flow (charging in, discharging out); House/PV/Grid are plain
-    // numbers. "PV direct" here is just the live total `solar` figure
-    // (same approximation drawRings' pvActive already makes) - the API
-    // has no live PV-to-home-only split, only today's cumulative one.
+    // inner ring's segments, and now the SAME icon glyphs the totals
+    // row uses too (2026, user request: "put the symbols also to the
+    // row with the momentary values"). Only Battery keeps its
+    // directional triangle ALONGSIDE its icon (2026, user request:
+    // "observe that the triangle... is not touched!") - it's the one
+    // source here with a real two-way flow (charging in, discharging
+    // out); House/PV/Grid are icon+number only. "PV direct" here is
+    // just the live total `solar` figure (same approximation drawRings'
+    // pvActive already makes) - the API has no live PV-to-home-only
+    // split, only today's cumulative one.
     function drawMomentaryLine(dc, cx, cy) {
         var font = Graphics.FONT_XTINY;
+        var iconSize = 11;
+        var iconGap = 4;
         var triLen = 7;
         var triHalfH = 4;
         var innerGap = 5;
-        var groupGap = 14;
+        var groupGap = 12;
 
         var homeActive = _liveHome > 0.05;
         var pvActive = _liveSolar > 0.05;
@@ -211,28 +263,41 @@ class HomePowerFaceView extends WatchUi.WatchFace {
 
         // Same HOUSE/PV-direct/Grid/Battery order as the totals row
         // below, so the two rows read as matching columns.
-        var homeW = dc.getTextWidthInPixels(homeText, font);
-        var pvW = dc.getTextWidthInPixels(pvText, font);
-        var gridW = dc.getTextWidthInPixels(gridText, font);
-        var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
+        var homeW = iconSize + iconGap + dc.getTextWidthInPixels(homeText, font);
+        var pvW = iconSize + iconGap + dc.getTextWidthInPixels(pvText, font);
+        var gridW = iconSize + iconGap + dc.getTextWidthInPixels(gridText, font);
+        var battW = iconSize + iconGap + momentaryGroupWidth(dc, font, triLen, innerGap, battText);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
         var y = cy - 85;
         var x = cx - (totalW / 2);
+        var yCenter = y + (dc.getFontHeight(font) / 2);
 
+        drawHouseIcon(dc, x + (iconSize / 2), yCenter, iconSize, homeColor);
+        x += iconSize + iconGap;
         dc.setColor(homeColor, Graphics.COLOR_BLACK);
         dc.drawText(x, y, font, homeText, Graphics.TEXT_JUSTIFY_LEFT);
-        x += homeW + groupGap;
+        x += dc.getTextWidthInPixels(homeText, font) + groupGap;
+
+        drawSunIcon(dc, x + (iconSize / 2), yCenter, iconSize, pvColor);
+        x += iconSize + iconGap;
         dc.setColor(pvColor, Graphics.COLOR_BLACK);
         dc.drawText(x, y, font, pvText, Graphics.TEXT_JUSTIFY_LEFT);
-        x += pvW + groupGap;
+        x += dc.getTextWidthInPixels(pvText, font) + groupGap;
+
+        drawBoltIcon(dc, x + (iconSize / 2), yCenter, iconSize, gridColor);
+        x += iconSize + iconGap;
         dc.setColor(gridColor, Graphics.COLOR_BLACK);
         dc.drawText(x, y, font, gridText, Graphics.TEXT_JUSTIFY_LEFT);
-        x += gridW + groupGap;
+        x += dc.getTextWidthInPixels(gridText, font) + groupGap;
+
+        drawBatteryIcon(dc, x + (iconSize / 2), yCenter, iconSize, battColor);
+        x += iconSize + iconGap;
         // Battery's triangle flips with real direction: discharging
         // (flowing out) points left/outward, charging (flowing in)
         // points right/inward - same convention the companion watch
-        // app's Overview/Battery pages use.
+        // app's Overview/Battery pages use. Untouched by the icon added
+        // just before it.
         x = drawMomentaryGroup(dc, x, y, font, battColor, battDischarging, battText, triLen, triHalfH, innerGap);
     }
 
@@ -384,9 +449,8 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // then blits it scaled down by `scale` - genuinely smaller than any
     // text font this device exposes, same bitmap-scaling technique the
     // companion watch app's drawScaledText uses (2026, user request:
-    // "a very small timestamp"). Center-justified only - the one caller
-    // here doesn't need more.
-    function drawScaledText(dc, cx, y, text, font, color, scale) {
+    // "a very small timestamp").
+    function drawScaledText(dc, x, y, text, font, color, scale, justify) {
         var tw = dc.getTextWidthInPixels(text, font);
         var th = dc.getFontHeight(font);
         if (tw <= 0 || th <= 0) { return; }
@@ -400,7 +464,15 @@ class HomePowerFaceView extends WatchUi.WatchFace {
 
         var destW = (tw * scale).toNumber();
         var destH = (th * scale).toNumber();
-        dc.drawScaledBitmap(cx - (destW / 2), y, destW, destH, bmp);
+        var destX;
+        if (justify == Graphics.TEXT_JUSTIFY_RIGHT) {
+            destX = x - destW;
+        } else if (justify == Graphics.TEXT_JUSTIFY_CENTER) {
+            destX = x - (destW / 2);
+        } else {
+            destX = x;
+        }
+        dc.drawScaledBitmap(destX, y, destW, destH, bmp);
     }
 
     // As low as the round bezel safely allows (2026, user request: "as
@@ -408,6 +480,6 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // doesn't need to know the center to sit near the very bottom edge.
     function drawUpdatedText(dc, cx, h) {
         drawScaledText(dc, cx, h - 70, "updated " + _updatedText, Graphics.FONT_XTINY,
-            Graphics.COLOR_LT_GRAY, 0.42);
+            Graphics.COLOR_LT_GRAY, 0.42, Graphics.TEXT_JUSTIFY_CENTER);
     }
 }
