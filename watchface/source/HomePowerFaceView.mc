@@ -206,6 +206,12 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var outerR = 205;
         var innerR = 183;
         var penW = 9;
+        // Thicker than the rest of the ring (2026, user request: "make
+        // sure that you highlight the inner circle... when that source
+        // is in use") - the full-color-vs-dim distinction already there
+        // wasn't a strong enough highlight on its own, so the active
+        // segment now visually bulges too.
+        var activePenW = 14;
 
         var clock = System.getClockTime();
         var dayFrac = (clock.hour + (clock.min / 60.0)) / 24.0;
@@ -228,10 +234,13 @@ class HomePowerFaceView extends WatchUi.WatchFace {
             var battActive = _liveBatteryPower < -0.05;
 
             var cw = 0.0;
+            dc.setPenWidth(gridActive ? activePenW : penW);
             dc.setColor(gridActive ? BRAND_ORANGE : GRID_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, gridDeg, cw);
+            dc.setPenWidth(pvActive ? activePenW : penW);
             dc.setColor(pvActive ? SOLAR_COLOR : SOLAR_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, pvDeg, cw);
+            dc.setPenWidth(battActive ? activePenW : penW);
             dc.setColor(battActive ? BATTERY_VIOLET : BATTERY_DIM, Graphics.COLOR_BLACK);
             cw = drawRingSegment(dc, cx, cy, innerR, battDeg, cw);
         }
