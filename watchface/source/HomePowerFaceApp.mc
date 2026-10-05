@@ -25,6 +25,22 @@ class HomePowerFaceApp extends Application.AppBase {
     const MIN_REFRESH_SECONDS = 300;
 
     function onStart(state) {
+        // "Only one temporal event may be registered at a time. Calling
+        // registerForTemporalEvent will overwrite any previously
+        // registered temporal events" - Garmin's own API docs. onStart
+        // isn't guaranteed to run only once per install; if it runs
+        // again (e.g. the watch face becoming active again) before the
+        // first scheduled event has fired, unconditionally registering
+        // a new one here OVERWRITES the pending one and pushes it
+        // further into the future - repeat that often enough (every
+        // time the wrist is raised, say) and the event can end up
+        // NEVER actually firing (2026, confirmed root cause of a user
+        // report: real watch stuck on "--:--" forever, diagnostic build
+        // showed "inv never" - the delegate was never even being
+        // invoked). Guard: only register if nothing is already pending.
+        if (Background.getTemporalEventRegisteredTime() != null) {
+            return;
+        }
         // Cold start (freshly installed, or relaunched before any
         // background fetch has ever landed) - get real data in as soon
         // as the platform allows (see MIN_REFRESH_SECONDS above)
