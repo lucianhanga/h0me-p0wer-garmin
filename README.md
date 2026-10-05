@@ -40,9 +40,15 @@ const USE_DEMO_DATA = false;
 
 const API_URL =
     "https://h0me-p0wer.lucianhanga.stream/api/watch/status";
+
+const API_TOKEN = "";
 ```
 
 With `USE_DEMO_DATA = true` the app runs standalone with static demo values — useful for compiling/testing without a backend. Set it to `false` (the current default) to pull live data from `API_URL` every 15s.
+
+### API_TOKEN
+
+The backend's `/api/watch/status` is optionally gated behind a shared token (see the `h0me-p0wer` repo's `server/auth.js`/`npm run token:generate`). Leave `API_TOKEN = ""` while the backend has no token configured — requests go through unauthenticated, same as before. Once a token exists, set `API_TOKEN` to that exact value here (sent as `Authorization: Bearer <token>`) and rebuild/reinstall. Tokens last 4 weeks; renewal is manual — regenerate on the backend, update this constant, rebuild, reinstall.
 
 ## Expected JSON
 
