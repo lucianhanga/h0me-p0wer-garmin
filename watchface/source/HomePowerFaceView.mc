@@ -190,7 +190,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var timeH = dc.getFontHeight(timeFont);
         var y = cy - 70;
 
-        var secScale = 0.5;
+        var secScale = 0.65;
         var secTw = dc.getTextWidthInPixels(secText, Graphics.FONT_TINY);
         var secTh = dc.getFontHeight(Graphics.FONT_TINY);
         var secDestW = (secTw * secScale).toNumber();
@@ -208,7 +208,8 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     }
 
     // Small date line directly under the time (2026, user request: "I
-    // also want the date") - "Oct 5" style via Gregorian.FORMAT_MEDIUM's
+    // also want the date"), now with the year too (2026, user request:
+    // "add also the year") - "Oct 5 2026" via Gregorian.FORMAT_MEDIUM's
     // abbreviated month name. A fixed offset from cy, not from
     // drawTime's measured font height - that measured height turned out
     // to include much more padding than the digits' actual visual
@@ -217,8 +218,8 @@ class HomePowerFaceView extends WatchUi.WatchFace {
     // both times. Tuned empirically against a screenshot instead.
     function drawDate(dc, cx, cy) {
         var info = Gregorian.info(Time.now(), Time.FORMAT_MEDIUM);
-        var dateText = info.month + " " + info.day;
-        drawScaledText(dc, cx, cy + 16, dateText, Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.55,
+        var dateText = info.month + " " + info.day + " " + info.year;
+        drawScaledText(dc, cx, cy + 16, dateText, Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.65,
             Graphics.TEXT_JUSTIFY_CENTER);
     }
 
@@ -240,9 +241,8 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var font = Graphics.FONT_XTINY;
         var iconSize = 11;
         var iconGap = 4;
-        var triLen = 7;
-        var triHalfH = 4;
-        var innerGap = 5;
+        var triLen = 6;
+        var triHalfH = 3;
         var groupGap = 12;
 
         var homeActive = _liveHome > 0.05;
@@ -262,11 +262,17 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var battText = _liveBatteryPower.abs().format("%.2f");
 
         // Same HOUSE/PV-direct/Grid/Battery order as the totals row
-        // below, so the two rows read as matching columns.
+        // below, so the two rows read as matching columns. Battery's
+        // direction triangle sits UNDER its icon now, not inline before
+        // the number (2026, user request: "put the direction triangle
+        // of the battery under the battery symbol so you reduce the
+        // line lengths" - also fixes the row overlapping the rings a
+        // bit, since it's shorter now), so its group width is just
+        // icon+number like the other three, no separate triangle lane.
         var homeW = iconSize + iconGap + dc.getTextWidthInPixels(homeText, font);
         var pvW = iconSize + iconGap + dc.getTextWidthInPixels(pvText, font);
         var gridW = iconSize + iconGap + dc.getTextWidthInPixels(gridText, font);
-        var battW = iconSize + iconGap + momentaryGroupWidth(dc, font, triLen, innerGap, battText);
+        var battW = iconSize + iconGap + dc.getTextWidthInPixels(battText, font);
         var totalW = homeW + pvW + gridW + battW + (groupGap * 3);
 
         var y = cy - 85;
@@ -291,47 +297,14 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.drawText(x, y, font, gridText, Graphics.TEXT_JUSTIFY_LEFT);
         x += dc.getTextWidthInPixels(gridText, font) + groupGap;
 
-        drawBatteryIcon(dc, x + (iconSize / 2), yCenter, iconSize, battColor);
+        // Discharging (flowing out) points left/outward, charging
+        // (flowing in) points right/inward - same convention the
+        // companion watch app's Overview/Battery pages use.
+        drawBatteryIconWithDirection(dc, x + (iconSize / 2), yCenter, iconSize, battColor,
+            battDischarging, triLen, triHalfH);
         x += iconSize + iconGap;
-        // Battery's triangle flips with real direction: discharging
-        // (flowing out) points left/outward, charging (flowing in)
-        // points right/inward - same convention the companion watch
-        // app's Overview/Battery pages use. Untouched by the icon added
-        // just before it.
-        x = drawMomentaryGroup(dc, x, y, font, battColor, battDischarging, battText, triLen, triHalfH, innerGap);
-    }
-
-    function momentaryGroupWidth(dc, font, triLen, innerGap, text) {
-        return triLen + innerGap + dc.getTextWidthInPixels(text, font);
-    }
-
-    // Draws [triangle][gap][number] starting at x, returns x after the
-    // number so the caller can chain the next group. `pointLeft` faces
-    // the triangle's apex left/outward (Grid exporting, Battery-out) or
-    // right/inward (Grid importing, PV always).
-    function drawMomentaryGroup(dc, x, y, font, color, pointLeft, text, triLen, triHalfH, innerGap) {
-        var cyTri = y + (dc.getFontHeight(font) / 2);
-        var cxTri = x + (triLen / 2);
-        dc.setColor(color, Graphics.COLOR_BLACK);
-        var points;
-        if (pointLeft) {
-            points = [
-                [cxTri - (triLen / 2), cyTri],
-                [cxTri + (triLen / 2), cyTri - triHalfH],
-                [cxTri + (triLen / 2), cyTri + triHalfH],
-            ];
-        } else {
-            points = [
-                [cxTri + (triLen / 2), cyTri],
-                [cxTri - (triLen / 2), cyTri - triHalfH],
-                [cxTri - (triLen / 2), cyTri + triHalfH],
-            ];
-        }
-        dc.fillPolygon(points);
-
-        var numX = x + triLen + innerGap;
-        dc.drawText(numX, y, font, text, Graphics.TEXT_JUSTIFY_LEFT);
-        return numX + dc.getTextWidthInPixels(text, font);
+        dc.setColor(battColor, Graphics.COLOR_BLACK);
+        dc.drawText(x, y, font, battText, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
     // The four today's-totals numbers, color-coded, each preceded by a
@@ -443,6 +416,35 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         var nubH = bodyH * 0.5;
         dc.fillRectangle((x - half + bodyW).toNumber(), (yCenter - (nubH / 2)).toNumber(),
             nubW.toNumber(), nubH.toNumber());
+    }
+
+    // Same battery icon, plus a small direction triangle stacked
+    // directly underneath it (2026, user request: "put the direction
+    // triangle of the battery under the battery symbol so you reduce
+    // the line lengths") - used only by the momentary row, which is the
+    // one place direction matters; the totals row's battery icon has no
+    // direction to show, so it stays the plain drawBatteryIcon above.
+    function drawBatteryIconWithDirection(dc, x, yCenter, size, color, pointLeft, triLen, triHalfH) {
+        drawBatteryIcon(dc, x, yCenter, size, color);
+
+        var half = size / 2.0;
+        var triY = yCenter + half + 3 + triHalfH;
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        var points;
+        if (pointLeft) {
+            points = [
+                [x - (triLen / 2), triY],
+                [x + (triLen / 2), triY - triHalfH],
+                [x + (triLen / 2), triY + triHalfH],
+            ];
+        } else {
+            points = [
+                [x + (triLen / 2), triY],
+                [x - (triLen / 2), triY - triHalfH],
+                [x - (triLen / 2), triY + triHalfH],
+            ];
+        }
+        dc.fillPolygon(points);
     }
 
     // Renders text at `font`'s native size into an offscreen buffer,
