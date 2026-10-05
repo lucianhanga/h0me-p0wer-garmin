@@ -103,6 +103,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.clear();
 
         drawRings(dc, cx, cy);
+        drawMomentaryLine(dc, cx, cy);
         drawTime(dc, cx, cy);
         drawValuesLine(dc, cx, cy);
     }
@@ -210,15 +211,100 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         dc.drawText(cx, cy - 70, Graphics.FONT_NUMBER_MEDIUM, timeText, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
+    // Momentary (instantaneous, not today's totals) Grid/PV-direct/
+    // Battery-out readouts above the clock (2026, user request), each
+    // with a small triangle that pulses when that source is actually
+    // active right now - same dim/pulse mechanism and active-detection
+    // as the inner ring's segments. PV has no real "direction" (a panel
+    // only ever produces), so its triangle always points inward, toward
+    // the clock, same as Grid importing; Battery-out's always points
+    // outward, matching its "out" name - only Grid's actually flips
+    // with real direction. "PV direct" here is just the live total
+    // `solar` figure (same approximation drawRings' pvActive already
+    // makes) - the API has no live PV-to-home-only split, only today's
+    // cumulative one.
+    function drawMomentaryLine(dc, cx, cy) {
+        var font = Graphics.FONT_TINY;
+        var triLen = 8;
+        var triHalfH = 5;
+        var innerGap = 6;
+        var groupGap = 16;
+
+        var gridActive = _liveGrid.abs() > 0.05;
+        var pvActive = _liveSolar > 0.05;
+        var battActive = _liveBatteryPower < -0.05;
+        var t = (Math.sin(_pulsePhase) + 1) / 2;
+
+        var gridColor = gridActive ? lerpColor(GRID_DIM, BRAND_ORANGE, t) : GRID_DIM;
+        var pvColor = pvActive ? lerpColor(SOLAR_DIM, SOLAR_COLOR, t) : SOLAR_DIM;
+        var battColor = battActive ? lerpColor(BATTERY_DIM, BATTERY_VIOLET, t) : BATTERY_DIM;
+
+        var gridExporting = _liveGrid < 0;
+        var gridText = _liveGrid.abs().format("%.2f");
+        var pvText = _liveSolar.format("%.2f");
+        var battMag = (_liveBatteryPower < 0) ? -_liveBatteryPower : 0.0;
+        var battText = battMag.format("%.2f");
+
+        var gridW = momentaryGroupWidth(dc, font, triLen, innerGap, gridText);
+        var pvW = momentaryGroupWidth(dc, font, triLen, innerGap, pvText);
+        var battW = momentaryGroupWidth(dc, font, triLen, innerGap, battText);
+        var totalW = gridW + pvW + battW + (groupGap * 2);
+
+        var y = cy - 135;
+        var x = cx - (totalW / 2);
+
+        x = drawMomentaryGroup(dc, x, y, font, gridColor, gridExporting, gridText, triLen, triHalfH, innerGap);
+        x += groupGap;
+        x = drawMomentaryGroup(dc, x, y, font, pvColor, false, pvText, triLen, triHalfH, innerGap);
+        x += groupGap;
+        x = drawMomentaryGroup(dc, x, y, font, battColor, true, battText, triLen, triHalfH, innerGap);
+    }
+
+    function momentaryGroupWidth(dc, font, triLen, innerGap, text) {
+        return triLen + innerGap + dc.getTextWidthInPixels(text, font);
+    }
+
+    // Draws [triangle][gap][number] starting at x, returns x after the
+    // number so the caller can chain the next group. `pointLeft` faces
+    // the triangle's apex left/outward (Grid exporting, Battery-out) or
+    // right/inward (Grid importing, PV always).
+    function drawMomentaryGroup(dc, x, y, font, color, pointLeft, text, triLen, triHalfH, innerGap) {
+        var cyTri = y + (dc.getFontHeight(font) / 2);
+        var cxTri = x + (triLen / 2);
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        var points;
+        if (pointLeft) {
+            points = [
+                [cxTri - (triLen / 2), cyTri],
+                [cxTri + (triLen / 2), cyTri - triHalfH],
+                [cxTri + (triLen / 2), cyTri + triHalfH],
+            ];
+        } else {
+            points = [
+                [cxTri + (triLen / 2), cyTri],
+                [cxTri - (triLen / 2), cyTri - triHalfH],
+                [cxTri - (triLen / 2), cyTri + triHalfH],
+            ];
+        }
+        dc.fillPolygon(points);
+
+        var numX = x + triLen + innerGap;
+        dc.drawText(numX, y, font, text, Graphics.TEXT_JUSTIFY_LEFT);
+        return numX + dc.getTextWidthInPixels(text, font);
+    }
+
     // Just the four numbers, color-coded, nothing else (2026, user
     // request: "just put the values on one line colored in the color
-    // code. nothing else") - no labels, no units. Measured and drawn as
-    // separate left-justified segments (same multi-color-on-one-line
-    // trick the companion app's header wordmark uses) so the whole row
-    // lands centered as a group.
+    // code. nothing else") - no labels, no units. Sized down a step
+    // (2026, user request: "make the number a bit smaller not to
+    // overlap the circles") since the row's width at this height was
+    // crowding the inner ring's curve. Measured and drawn as separate
+    // left-justified segments (same multi-color-on-one-line trick the
+    // companion app's header wordmark uses) so the whole row lands
+    // centered as a group.
     function drawValuesLine(dc, cx, cy) {
-        var font = Graphics.FONT_MEDIUM;
-        var gap = 18;
+        var font = Graphics.FONT_SMALL;
+        var gap = 16;
         var values = [
             [_homeToday, HOME_COLOR],
             [_pvDirectToday, SOLAR_COLOR],
@@ -235,7 +321,7 @@ class HomePowerFaceView extends WatchUi.WatchFace {
         }
 
         var x = cx - (totalW / 2);
-        var y = cy + 30;
+        var y = cy + 35;
         for (var j = 0; j < values.size(); j += 1) {
             dc.setColor(values[j][1], Graphics.COLOR_BLACK);
             dc.drawText(x, y, font, texts[j], Graphics.TEXT_JUSTIFY_LEFT);
