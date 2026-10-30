@@ -16,8 +16,9 @@ A native Garmin Connect IQ watch app for the 454×454 AMOLED Fēnix 8 target, sh
 2. **Solar** — a stacked-area graph spanning the whole day (0h–24h on the x-axis) - PV→battery stacked under PV→home, total production traced on top, same composition as the web app's Graph tab - with a pulsing dot marking "now", plus today's total and peak
 3. **Home** — 24 fixed hourly stacked bars (grid base, battery middle, solar remainder on top), matching the web app's Dashboard stacked-bar composition, plus today's total and the current rate
 4. **Battery** — charge %, a fill bar with LOW/HIGH SOC threshold markers, charge/discharge rate, "TO FULL"/"TO EMPTY" time estimate, capacity - the title carries the same direction triangle as Overview's Battery cell
-5. **Today** — a breakdown matching the web app's Dashboard "today" tile: total consumption, produced, then Grid/direct-PV/from-battery/to-battery/to-grid each with kWh (percentages, computed the same way the web app does, only on the three rows that sum to ~100% of consumption)
-6. **Connection** — online/offline status, manual retry
+5. **Today** — a breakdown matching the web app's Dashboard "today" tile: total consumption, produced, then Grid/direct-PV/from-battery/to-battery/to-grid each with kWh (percentages, computed the same way the web app does, only on the three rows that sum to ~100% of consumption), plus EUR spent and saved
+6. **Consumers** — today's home consumption as a ring, including grouped, estimated, and metered loads as well as individual plugs. Consumer segments run clockwise from 12 o'clock in payload order, followed by a grey **Rest of home** segment for consumption not attributed to a listed consumer. The center shows `homeToday` as the whole-house total. A single-line legend below the ring cycles through each consumer and Rest of home every ~2 seconds, showing its name, kWh, and share; long names are truncated with an ellipsis to fit.
+7. **Connection** — online/offline status, manual retry
 
 Click/tap the watch face (or press **START/ENTER**) to advance a page; the last page retries the connection instead of advancing.
 
@@ -41,14 +42,14 @@ const USE_DEMO_DATA = false;
 const API_URL =
     "https://h0me-p0wer.lucianhanga.stream/api/watch/status";
 
-const API_TOKEN = "";
+const API_TOKEN = Secrets.API_TOKEN;
 ```
 
-With `USE_DEMO_DATA = true` the app runs standalone with static demo values — useful for compiling/testing without a backend. Set it to `false` (the current default) to pull live data from `API_URL` every 15s.
+With `USE_DEMO_DATA = false` (the current default) the app pulls live data from `API_URL` every 15s. Set it to `true` to opt into standalone demo values — useful for compiling/testing without a backend.
 
 ### API_TOKEN
 
-The backend's `/api/watch/status` is optionally gated behind a shared token (see the `h0me-p0wer` repo's `server/auth.js`/`npm run token:generate`). Leave `API_TOKEN = ""` while the backend has no token configured — requests go through unauthenticated, same as before. Once a token exists, set `API_TOKEN` to that exact value here (sent as `Authorization: Bearer <token>`) and rebuild/reinstall. Tokens last 4 weeks; renewal is manual — regenerate on the backend, update this constant, rebuild, reinstall.
+The backend's `/api/watch/status` is optionally gated behind a shared token (see the `h0me-p0wer` repo's `server/auth.js`/`npm run token:generate`). Copy `source/Secrets.mc.example` to the gitignored `source/Secrets.mc`. Leave `Secrets.API_TOKEN = ""` while the backend has no token configured — requests go through unauthenticated, same as before. Once a token exists, set `Secrets.API_TOKEN` to that exact value (sent as `Authorization: Bearer <token>`) and rebuild/reinstall. Tokens last 4 weeks; renewal is manual — regenerate on the backend, update `source/Secrets.mc`, rebuild, reinstall.
 
 ## Expected JSON
 
@@ -73,6 +74,13 @@ The backend's `/api/watch/status` is optionally gated behind a shared token (see
   "importedToday": 6.4,
   "batteryDischargedToday": 3.8,
   "batteryChargedToday": 9.2,
+  "spentToday": 3.25,
+  "savedToday": 4.80,
+  "consumersToday": [
+    {"name": "Dishwasher", "kwh": 1.20},
+    {"name": "EV", "kwh": 3.40}
+  ],
+  "consumersRestToday": 16.60,
   "solarHistory": [0.4, 0.7, 1.1, 1.8, 2.6, 3.4, 4.0, 4.4],
   "solarBatteryHistory": [0.0, 0.1, 0.3, 0.6, 0.9, 1.2, 1.4, 1.5],
   "homeHistory": [1.2, 1.6, 1.3, 1.1, 1.0, 1.2, 1.4, 1.7],
@@ -82,7 +90,11 @@ The backend's `/api/watch/status` is optionally gated behind a shared token (see
 }
 ```
 
-`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. `solarToday` is total production; `solarDirectToday` is the PV-direct-to-home portion of it (a smaller number). `batteryDischargedToday`/`batteryChargedToday` are cells-only, excluding PV pass-through. The `*History` arrays feed the Solar day graph and Home stacked bars — they span from local midnight to now, one point per hour. `solarBatteryHistory` is the portion of each `solarHistory` sample routed to the battery (same cadence/length) — the Solar graph stacks it under the PV→home remainder beneath the total production line. `homeFromGridHistory`/`homeFromBatteryHistory` split `homeHistory` the same way for the Home page's stacked bars (grid base, battery middle, solar remainder — `homeHistory[i] - homeFromGridHistory[i] - homeFromBatteryHistory[i]` — on top). Any array shorter than its sibling (e.g. still demo-fallback) is nearest-neighbor resampled onto the real array's index range rather than truncating it.
+`grid`: negative = exporting, positive = importing. `batteryPower`: positive = charging, negative = discharging. `solarToday` is total production; `solarDirectToday` is the PV-direct-to-home portion of it (a smaller number). `batteryDischargedToday`/`batteryChargedToday` are cells-only, excluding PV pass-through. `spentToday` and `savedToday` are EUR amounts shown on the Today screen. `consumersToday` contains `{"name": string, "kwh": number}` objects, with `kwh` giving each consumer's energy today; `consumersRestToday` is the remaining whole-house consumption not attributed to those consumers. The Consumers screen strips a leading `h-solar-` from display names, or otherwise a leading `h-`. Segment and legend colors are assigned by list position from a repeating 16-color palette, while Rest of home is always grey.
+
+The ring proportions and legend percentages use the sum of `consumersToday` plus `consumersRestToday`; the ring's center instead displays `homeToday`. The consumer sum can differ slightly from `homeToday` because the backend integrates detailed consumer data and whole-house consumption through different paths.
+
+The `*History` arrays feed the Solar day graph and Home stacked bars — they span from local midnight to now, one point per hour. `solarBatteryHistory` is the portion of each `solarHistory` sample routed to the battery (same cadence/length) — the Solar graph stacks it under the PV→home remainder beneath the total production line. `homeFromGridHistory`/`homeFromBatteryHistory` split `homeHistory` the same way for the Home page's stacked bars (grid base, battery middle, solar remainder — `homeHistory[i] - homeFromGridHistory[i] - homeFromBatteryHistory[i]` — on top). Any array shorter than its sibling (e.g. still demo-fallback) is nearest-neighbor resampled onto the real array's index range rather than truncating it.
 
 ## Installing on the real watch
 

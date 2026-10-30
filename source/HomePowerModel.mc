@@ -1,4 +1,5 @@
 using Toybox.System;
+using Toybox.Lang;
 
 class HomePowerModel {
     var solarKw = 4.21;
@@ -29,16 +30,27 @@ class HomePowerModel {
     var solarDirectTodayKwh = 6.9;
     var batteryDischargedTodayKwh = 3.8;
     var batteryChargedTodayKwh = 9.2;
+    var spentTodayEur = 0.0;
+    var savedTodayEur = 0.0;
     var updatedText = "--:--";
+
+    // Today's home consumption split by consumers - array of
+    // {:name => raw consumer name, :kwh => Float}. Ring colors use list
+    // position because the watch payload has no colorIdx. Empty by default
+    // (NOT demo-filled here - the Consumers page treats an empty list with
+    // no rest value as its "no consumer data" state); updateDemo fills it
+    // in demo mode.
+    var consumersToday as Lang.Array = [];
+    // Everything the house consumed today that no consumer accounted for.
+    var consumersRestToday = 0.0;
 
     var solarHistory = [0.4,0.7,1.1,1.8,2.6,3.4,4.0,4.4,4.6,4.5,4.2,3.8,3.0,2.1,1.2,0.5];
     var homeHistory = [1.2,1.6,1.3,1.1,1.0,1.2,1.4,1.7,2.3,2.6,2.2,1.8,1.7,1.5,1.4,1.3];
     var gridHistory = [-0.8,-1.1,-1.6,-2.1,-2.4,-2.8,-3.1,-3.0,-2.6,-2.2,-1.8,-1.2,-0.6,0.2,0.5,0.3];
     // Portion of solarHistory routed to the battery rather than the house,
     // same index/cadence as solarHistory - the Solar page's day graph
-    // stacks this under the total production line (see WATCH.readme in
-    // the backend repo: not sent by the live API yet, so this demo curve
-    // is also the fallback when the field is absent).
+    // stacks this under the total production line. The live API sends this
+    // field; this demo curve is also the fallback when it is absent.
     var solarBatteryHistory = [0.0,0.1,0.3,0.6,0.9,1.2,1.4,1.5,1.5,1.4,1.2,0.9,0.6,0.3,0.1,0.0];
     // Home's two non-solar sources, same index/cadence as homeHistory -
     // the Home page stacks grid (base) + battery (middle) + the remainder
@@ -65,6 +77,18 @@ class HomePowerModel {
         gridKw = homeKw - solarKw;
         batteryPct = 78;
         batteryKw = 1.20;
+        spentTodayEur = 3.42;
+        savedTodayEur = 5.67;
+        // Fake consumers for the Consumers page, slowly drifting with the
+        // same bump. Ring colors use list position because the watch payload
+        // has no colorIdx.
+        consumersToday = [
+            {:name => "h-office", :kwh => 0.42 + (bump / 2.0)},
+            {:name => "h-solar-dishwasher", :kwh => 1.20 + bump},
+            {:name => "h-solar-ev", :kwh => 3.40 + (bump * 2.0)},
+            {:name => "h-water-heater", :kwh => 0.87 + (bump / 4.0)},
+        ];
+        consumersRestToday = 16.6 - bump;
         stampNow();
     }
 
@@ -86,6 +110,29 @@ class HomePowerModel {
         solarDirectTodayKwh = getFloat(data, "solarDirectToday", solarDirectTodayKwh);
         batteryDischargedTodayKwh = getFloat(data, "batteryDischargedToday", batteryDischargedTodayKwh);
         batteryChargedTodayKwh = getFloat(data, "batteryChargedToday", batteryChargedTodayKwh);
+        spentTodayEur = getFloat(data, "spentToday", spentTodayEur);
+        savedTodayEur = getFloat(data, "savedToday", savedTodayEur);
+        consumersRestToday = getFloat(data, "consumersRestToday", consumersRestToday);
+
+        // [{"name": "h-solar-dishwasher", "kwh": 1.23}, ...] - all fields
+        // optional; non-dictionaries and entries with missing or null
+        // name/kwh are dropped rather than failing the whole merge.
+        // An empty array is kept as-is (the Consumers page
+        // can still render a rest-only ring); an absent field keeps the
+        // previous value, like every other field here.
+        var rawConsumers = data.get("consumersToday");
+        if (rawConsumers instanceof Lang.Array) {
+            var parsed = [];
+            for (var i = 0; i < rawConsumers.size(); i += 1) {
+                var entry = rawConsumers[i];
+                if (!(entry instanceof Lang.Dictionary)) { continue; }
+                var name = entry["name"];
+                var kwh = entry["kwh"];
+                if (name == null || kwh == null) { continue; }
+                parsed.add({:name => name.toString(), :kwh => kwh.toFloat()});
+            }
+            consumersToday = parsed;
+        }
 
         if (data.hasKey("solarHistory") && data["solarHistory"] != null) {
             solarHistory = data["solarHistory"];

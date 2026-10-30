@@ -3,9 +3,10 @@ using Toybox.WatchUi;
 using Toybox.Timer;
 using Toybox.System;
 using Toybox.Math;
+using Toybox.Lang;
 
 class HomePowerView extends WatchUi.View {
-    const PAGE_COUNT = 6;
+    const PAGE_COUNT = 7;
 
     // Layout tuned specifically for the 454x454 round AMOLED display used by
     // the Fenix 8 47 mm / 51 mm. All large text stays inside the wide middle
@@ -41,6 +42,14 @@ class HomePowerView extends WatchUi.View {
     const PULSE_TICK_MS = 250;
     const PULSE_STEP = 0.5; // radians per tick
 
+    // Consumers page flowing legend - cycles one entry every ~2s, driven
+    // by the same pulse timer (no second timer). _legendIndex is taken
+    // modulo the entry count at draw time so a shrinking list can't leave
+    // it pointing past the end.
+    var _legendTicks = 0;
+    var _legendIndex = 0;
+    const LEGEND_TICKS_PER_ENTRY = 8; // 8 x 250ms = 2s per entry
+
     function initialize() {
         View.initialize();
         _model = new HomePowerModel();
@@ -62,6 +71,11 @@ class HomePowerView extends WatchUi.View {
         _pulsePhase += PULSE_STEP;
         if (_pulsePhase > 2 * Math.PI) {
             _pulsePhase -= 2 * Math.PI;
+        }
+        _legendTicks += 1;
+        if (_legendTicks >= LEGEND_TICKS_PER_ENTRY) {
+            _legendTicks = 0;
+            _legendIndex += 1;
         }
         WatchUi.requestUpdate();
     }
@@ -86,7 +100,7 @@ class HomePowerView extends WatchUi.View {
     }
 
     function activate() {
-        if (_page == 5 || !_online) {
+        if (_page == 6 || !_online) {
             _service.refresh();
         } else {
             nextPage();
@@ -104,6 +118,7 @@ class HomePowerView extends WatchUi.View {
         else if (_page == 2) { drawHome(dc); }
         else if (_page == 3) { drawBattery(dc); }
         else if (_page == 4) { drawList(dc); }
+        else if (_page == 5) { drawConsumers(dc); }
         else { drawConnection(dc); }
 
         drawFooter(dc);
@@ -165,9 +180,9 @@ class HomePowerView extends WatchUi.View {
         var statusColor = _online ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_RED;
         drawScaledText(dc, w / 2, FOOTER_STATUS_Y + 2, status, Graphics.FONT_XTINY, statusColor, 0.74, Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Eight small dots are much safer on a round screen than a wide
-        // "1/8  up/down pages" string near the lower bezel.
-        var firstX = (w / 2) - 42;
+        // Small dots are much safer on a round screen than a wide
+        // "N/M  up/down pages" string near the lower bezel.
+        var firstX = (w / 2) - (((PAGE_COUNT - 1) * 12) / 2);
         for (var i = 0; i < PAGE_COUNT; i += 1) {
             dc.setColor(i == _page ? Graphics.COLOR_WHITE : Graphics.COLOR_DK_GRAY, Graphics.COLOR_BLACK);
             dc.fillCircle(firstX + (i * 12), FOOTER_DOTS_Y, i == _page ? 4 : 2);
@@ -610,7 +625,7 @@ class HomePowerView extends WatchUi.View {
         var fromBattPct = pct(_model.batteryDischargedTodayKwh, home);
 
         var rowY = 212;
-        var rowStep = 31;
+        var rowStep = 27;
         // Grid uses todayRowGrid (triangle AFTER the word, matching the
         // Overview page's own Grid cell - "GRID ->" importing / "GRID <-"
         // exporting). Battery keeps the triangle in the shared left
@@ -624,6 +639,11 @@ class HomePowerView extends WatchUi.View {
         todayRowTriangle(dc, rowY, "BATT", true, BATTERY_CHARGE_GREY, _model.batteryChargedTodayKwh, "");
         rowY += rowStep;
         todayRowGrid(dc, rowY, true, BRAND_ORANGE, _model.exportedTodayKwh, "");
+
+        var moneyText = "spent EUR " + _model.spentTodayEur.format("%.2f") +
+            "  saved EUR " + _model.savedTodayEur.format("%.2f");
+        drawScaledText(dc, cx, 349, moneyText, Graphics.FONT_XTINY,
+            Graphics.COLOR_LT_GRAY, 0.45, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     // kWh as a % of `base` (home consumption for most rows, today's total
@@ -737,6 +757,150 @@ class HomePowerView extends WatchUi.View {
             drawScaledText(dc, SAFE_RIGHT, y, pctText, Graphics.FONT_TINY, Graphics.COLOR_WHITE,
                 pctScale, Graphics.TEXT_JUSTIFY_RIGHT);
         }
+    }
+
+    // Today's home consumption split by consumers as a donut/ring chart:
+    // one arc segment per consumer, "Rest of home" last, today's total +
+    // "Whole house" in the center, and a single-line flowing legend below
+    // the ring that auto-cycles through the segments (~2s each, driven by
+    // the pulse timer - see onPulseTick). Colors use list position because
+    // the watch payload has no colorIdx. No tap action here - tap stays
+    // page navigation.
+    function drawConsumers(dc) {
+        var w = dc.getWidth();
+        var cx = w / 2;
+
+        // Home's identity off-white - this page is a breakdown of the
+        // same home consumption the Home/Today pages total up.
+        title(dc, "CONSUMERS", HOME_COLOR);
+
+        // The instanceof check isn't a real runtime guard (the model
+        // field is always an array) - it pins the local's inferred type
+        // to Lang.Array so element access below compiles warning-free.
+        var consumers = _model.consumersToday;
+        if (!(consumers instanceof Lang.Array)) { consumers = []; }
+        var rest = _model.consumersRestToday;
+
+        var total = rest;
+        for (var i = 0; i < consumers.size(); i += 1) {
+            var c = consumers[i];
+            if (c instanceof Lang.Dictionary) {
+                total += c[:kwh];
+            }
+        }
+
+        // Neutral centered state only when consumers and rest have no
+        // positive total; a rest-only payload still renders its ring.
+        if (total <= 0) {
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
+            dc.drawText(cx, 210, Graphics.FONT_XTINY, "no consumer data", Graphics.TEXT_JUSTIFY_CENTER);
+            return;
+        }
+
+        // Ring proportions mirror the web ring's 62%-88% thickness: arc
+        // centerline radius 80 with a 30px pen puts the ring at 65..95px,
+        // i.e. 60%-88% of the 108px chart radius. Segments sweep
+        // clockwise from 12 o'clock in list order, rest last - same
+        // drawArc-per-segment approach as the watchface's inner
+        // consumption ring (drawRingSegment below is that helper, ported).
+        var cy = 222;
+        var arcR = 80;
+        dc.setPenWidth(30);
+        var cw = 0.0;
+        for (var k = 0; k < consumers.size(); k += 1) {
+            var seg = consumers[k];
+            if (!(seg instanceof Lang.Dictionary)) { continue; }
+            dc.setColor(Config.CONSUMER_PALETTE[k % Config.CONSUMER_PALETTE.size()], Graphics.COLOR_BLACK);
+            cw = drawRingSegment(dc, cx, cy, arcR, (seg[:kwh] / total) * 360.0, cw);
+        }
+        dc.setColor(Config.CONSUMER_REST_COLOR, Graphics.COLOR_BLACK);
+        cw = drawRingSegment(dc, cx, cy, arcR, (rest / total) * 360.0, cw);
+        dc.setPenWidth(1);
+
+        // Center overlay: today's total kWh (the model's homeToday value,
+        // mirrors the web overlay) + "Whole house", both bitmap-scaled to
+        // fit inside the ring's inner 130px chord. The total can differ
+        // slightly from the consumer sum because the backend integrates
+        // them through different paths.
+        drawScaledText(dc, cx, 194, kwhNumber(_model.homeTodayKwh) + " kWh",
+            Graphics.FONT_SMALL, Graphics.COLOR_WHITE, 0.72, Graphics.TEXT_JUSTIFY_CENTER);
+        drawScaledText(dc, cx, 238, "Whole house",
+            Graphics.FONT_XTINY, Graphics.COLOR_LT_GRAY, 0.55, Graphics.TEXT_JUSTIFY_CENTER);
+
+        // Flowing legend: one entry at a time (color dot + display name +
+        // "1.23 kWh (24%)"), consumers in list order with "Rest of home"
+        // as the last entry, looping.
+        var entryCount = consumers.size() + 1;
+        var idx = _legendIndex % entryCount;
+        var legendName;
+        var legendKwh;
+        var legendColor;
+        var legendEntry = (idx < consumers.size()) ? consumers[idx] : null;
+        if (legendEntry instanceof Lang.Dictionary) {
+            legendName = consumerDisplayName(legendEntry[:name]);
+            legendKwh = legendEntry[:kwh];
+            legendColor = Config.CONSUMER_PALETTE[idx % Config.CONSUMER_PALETTE.size()];
+        } else {
+            legendName = "Rest of home";
+            legendKwh = rest;
+            legendColor = Config.CONSUMER_REST_COLOR;
+        }
+        // Ring's outer bottom edge is 222+95=317; the legend line sits
+        // below it, above the footer status row.
+        drawConsumerLegend(dc, cx, 325, legendName, legendKwh, total, legendColor);
+    }
+
+    // Consumer names come from an internal naming convention like
+    // "h-solar-dishwasher" - strip the prefix at render time: "h-solar-"
+    // first, otherwise a bare "h-".
+    function consumerDisplayName(rawName) {
+        if (rawName.find("h-solar-") == 0) {
+            return rawName.substring(8, rawName.length());
+        }
+        if (rawName.find("h-") == 0) {
+            return rawName.substring(2, rawName.length());
+        }
+        return rawName;
+    }
+
+    // Draws one arc `sweepDeg` degrees long, starting `cwStart` degrees
+    // clockwise from 12 o'clock, and returns the new cumulative clockwise
+    // offset so the next segment continues where this one ended. drawArc's
+    // angles are standard math angles (degrees counterclockwise from 3
+    // o'clock) - converted here from "clockwise-from-12" terms. Ported
+    // from the watchface's inner consumption ring (watchface/source/
+    // HomePowerFaceView.mc drawRingSegment).
+    function drawRingSegment(dc, cx, cy, r, sweepDeg, cwStart) {
+        if (sweepDeg <= 0) { return cwStart; }
+        var cwEnd = cwStart + sweepDeg;
+        dc.drawArc(cx, cy, r, Graphics.ARC_CLOCKWISE, 90 - cwStart, 90 - cwEnd);
+        return cwEnd;
+    }
+
+    // One flowing-legend entry: a dot in the segment's color + "name 1.23
+    // kWh (24%)". Truncate only the name when needed to keep the centered
+    // group inside the round screen's safe horizontal bounds.
+    function drawConsumerLegend(dc, cx, y, name, kwhValue, total, color) {
+        var suffix = "  " + kwhValue.format("%.2f") + " kWh (" + pct(kwhValue, total) + ")";
+        var shownName = name;
+        var scale = 0.7;
+        var dotR = 5;
+        var gap = 6;
+        var available = ((SAFE_RIGHT - SAFE_LEFT) - (dotR * 2) - gap) / scale;
+        while (shownName.length() > 1 &&
+                dc.getTextWidthInPixels(shownName + "..." + suffix, Graphics.FONT_XTINY) > available) {
+            shownName = shownName.substring(0, shownName.length() - 1);
+        }
+        if (!shownName.equals(name)) { shownName += "..."; }
+        var text = shownName + suffix;
+        var textW = (dc.getTextWidthInPixels(text, Graphics.FONT_XTINY) * scale).toNumber();
+        var totalW = (dotR * 2) + gap + textW;
+        var startX = cx - (totalW / 2);
+
+        dc.setColor(color, Graphics.COLOR_BLACK);
+        dc.fillCircle(startX + dotR, y + 13, dotR);
+        drawScaledText(dc, startX + (dotR * 2) + gap, y, text, Graphics.FONT_XTINY,
+            Graphics.COLOR_WHITE, scale, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
     function drawConnection(dc) {
@@ -891,12 +1055,11 @@ class HomePowerView extends WatchUi.View {
 
         // `count` is driven by totalValues alone - the total production
         // line and "now" dot must always use every real point it has.
-        // battValues can be a different length (e.g. still the static
-        // demo fallback while the backend doesn't send this field yet -
-        // see WATCH.readme follow-up 2) and gets nearest-neighbor
-        // resampled onto the same x-grid instead of clamping totalValues
-        // down to it, which previously silently discarded the most
-        // recent real hours whenever the two arrays' lengths differed.
+        // battValues can be a different length (e.g. the static demo
+        // fallback if the live API omits solarBatteryHistory) and gets
+        // nearest-neighbor resampled onto the same x-grid instead of
+        // clamping totalValues down to it, which previously silently discarded
+        // the most recent real hours whenever the two arrays' lengths differed.
         var count = totalValues.size();
         if (count <= 0) { return; }
         var battCount = battValues.size();
