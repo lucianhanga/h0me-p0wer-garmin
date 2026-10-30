@@ -15,4 +15,16 @@ module Config {
     const API_TOKEN = Secrets.API_TOKEN;
 
     const REFRESH_MS = 15000;
+
+    // Consumers page 16-color fallback palette, assigned by list position
+    // (cycled when there are more consumers than entries) because the watch
+    // payload has no colorIdx.
+    const CONSUMER_PALETTE = [
+        0xDD5F5F, 0x5FDDDD, 0x9EDD5F, 0x9E5FDD,
+        0xDDBE5F, 0x5F7FDD, 0x5FDD7F, 0xDD5FBE,
+        0xDD8E5F, 0x5FAEDD, 0x6FDD5F, 0xCD5FDD,
+        0xCDDD5F, 0x6F5FDD, 0x5FDDAE, 0xDD5F8E,
+    ];
+    // "Rest of home" segment - always this grey, never from the palette.
+    const CONSUMER_REST_COLOR = 0x90A4AE;
 }
